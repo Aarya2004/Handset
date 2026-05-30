@@ -631,6 +631,32 @@
         console.log("[BRIDGE] conduct ->", intent);
       }
       window.conductIntent = conductIntent;
+
+      // recent conversation context (last few captions) for disambiguation
+      let recentContext = [];
+      function pushContext(who, text) {
+        const tag = who === "you" ? "ME" : "AARYA";
+        recentContext.push(`${tag}: ${text}`);
+        while (recentContext.length > 4) recentContext.shift();
+      }
+
+      // the DISAMBIGUATE path: recognizer is UNSURE -> hand Nemotron the top-3
+      // candidates + call context, let it pick the right sign and expand it.
+      // The resolved sentence comes back via the "spoken" echo.
+      function disambiguateSign(candidates) {
+        fireWave();
+        if (bridge && bridge.readyState === 1)
+          bridge.send(
+            JSON.stringify({
+              type: "sign",
+              mode: "disambiguate",
+              candidates, // [[label, conf], ...]
+              context: recentContext.slice(),
+            }),
+          );
+        console.log("[BRIDGE] disambiguate ->", candidates);
+      }
+      window.disambiguateSign = disambiguateSign;
       // canonical phrases for the demo vocab (verbatim hero path, no LLM)
       const PHRASE = {
         HELLO: "Hi there.",
@@ -714,7 +740,15 @@
               speakOnCall(token, PHRASE[token] || token.toLowerCase());
             }
           } else if (conf >= ASK) {
-            showGate(probe); // 0.55–0.85 -> top-3 tap to confirm + learn
+            // 0.55–0.85: unsure. Let Nemotron pick from top-3 + call context.
+            if (!(lastEmit.token === token && now - lastEmit.t < COOLDOWN)) {
+              lastEmit = { token, t: now };
+              heldCount = 0;
+              $("reading").innerHTML =
+                `<span style="color:var(--amber)">unsure ▸ asking the agent…</span>`;
+              flashChip(token);
+              disambiguateSign(topK(probe, 3));
+            }
           }
         }
       }
@@ -806,6 +840,7 @@
       }
       let capLines = [];
       function pushCaption(who, text) {
+        pushContext(who, text); // feed conversation context for disambiguation
         capLines.forEach((l) => l.classList.add("old"));
         const d = document.createElement("div");
         d.className = `cap ${who}`;
