@@ -1,22 +1,22 @@
 """
-server/omni_recognizer.py — NVIDIA Nemotron VL (on AWS Bedrock) sign reader.
+server/omni_recognizer.py — NVIDIA Nemotron 3 Nano Omni sign reader (motion tier).
 
-This is the OMNI EVAL BEAT (not the live recognizer). It sends a few sampled
-frames of someone signing to NVIDIA's Nemotron-Nano-12B-v2-VL vision-language
-model hosted on AWS Bedrock (us-west-2), and asks it to name the sign. We run it
-SIDE-BY-SIDE against the on-device MediaPipe recognizer and score both in Cekura
-— the "we used an open NVIDIA multimodal model on AWS + measured it" story.
+Sends a few sampled frames of someone signing to NVIDIA's multimodal model and
+asks it to name the sign. This is the DYNAMIC / motion-sign tier: recognizer.js
+detects a motion burst and POSTs the frames here; the result feeds back into the
+sentence buffer -> Nemotron conduct. On-device MediaPipe k-NN stays the fast spine
+for static signs; this VLM handles movement signs (THANK-YOU etc.).
 
-NOT on the live demo critical path: VL on ASL is unproven, so MediaPipe stays the
-spine. This endpoint exists for the comparison/eval, behind a config flag.
+Backend (VLM_BACKEND env):
+  - omni (default): Nemotron 3 Nano Omni via OpenRouter (OpenAI-compatible,
+    multimodal, no GPU/AWS). Key = OPENROUTER_API_KEY (in server/.env).
+  - bedrock: legacy AWS Bedrock Nemotron VL path (needs AWS creds + access).
+Both share the same prompt + SIGN:/CONFIDENCE: contract.
 
-Env (already in .env):
-  AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION=us-west-2
-  NEMOTRON_VL_MODEL=nvidia.nemotron-nano-12b-v2
-
-Run the FastAPI eval server:  uv run python omni_recognizer.py   (port 8788)
-  POST /recognize-omni  { "frames": ["data:image/jpeg;base64,...", ...] }
-    -> { "model": "...", "sign": "APPOINTMENT", "raw": "...", "latency_ms": 1234 }
+Run the FastAPI server:  uv run python omni_recognizer.py --serve   (port 8788)
+  POST /recognize-omni  { "frames": ["data:image/jpeg;base64,...", ...], "vocab": [...] }
+    -> { "model": "...", "backend": "omni", "sign": "THANK-YOU", "confidence": 0.85,
+         "raw": "...", "latency_ms": 1234 }
 """
 
 import base64
@@ -44,10 +44,11 @@ REGION = os.getenv("AWS_REGION", "us-west-2")
 MAX_IMAGES = int(os.getenv("NEMOTRON_VL_MAX_IMAGES", "4"))
 
 # Omni (OpenRouter) config — the new default.
-# Use the NON-reasoning VL model: it answers directly (~2-3s, clean SIGN: line)
-# instead of burning the token budget on chain-of-thought like the :reasoning
-# variant (which took ~6s and often returned empty). Override via OMNI_VL_MODEL.
-OMNI_MODEL = os.getenv("OMNI_VL_MODEL", "nvidia/nemotron-nano-12b-v2-vl:free")
+# Nemotron 3 Nano Omni — the model we showcase (the multimodal "Omni" sponsor
+# surface). It's a reasoning model, so it gets token headroom (OMNI_MAX_TOKENS,
+# default 900) + a `reasoning`-field fallback in _invoke_omni so it never returns
+# empty. Override via OMNI_VL_MODEL if you want the nano-12b-v2-vl variant instead.
+OMNI_MODEL = os.getenv("OMNI_VL_MODEL", "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free")
 OMNI_BASE_URL = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
 # Bedrock config (legacy backend)
 BEDROCK_MODEL_ID = os.getenv("NEMOTRON_VL_MODEL", "nvidia.nemotron-nano-12b-v2")
