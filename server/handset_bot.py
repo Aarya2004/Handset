@@ -94,15 +94,17 @@ NEMOTRON_URL = os.getenv(
 ).rstrip("/") + "/chat/completions"
 NEMOTRON_MODEL = os.getenv("NEMOTRON_LLM_MODEL", "nvidia/nemotron-3-super")
 CONDUCT_SYSTEM = (
-    "You are the spoken voice of a Deaf caller on a live phone call. You receive their "
+    "You are the spoken voice of a Deaf person in a live conversation. You receive their "
     "recognized ASL sign tokens — often sparse, out of order, or with fingerspelling errors. "
-    "Speak ONE short, natural, polite sentence that expresses their FULL intent to the "
-    "receptionist: infer the complete request from the COMBINATION of tokens, don't read them "
-    "literally. Fix fingerspelling from context. Reply with ONLY the sentence, no quotes. "
+    "Speak ONE short, natural sentence that expresses their FULL intent, in a tone that FITS "
+    "the situation: casual and warm with a friend, polite and clear with a clinic or business. "
+    "Infer the complete meaning from the COMBINATION of tokens; don't read them literally. "
+    "Fix fingerspelling from context. Reply with ONLY the sentence, no quotes. "
     "Examples: "
-    "'DOCTOR, THURSDAY' -> Hi, I'd like to book an appointment with the doctor for Thursday. | "
-    "'REFILL, Z,O,L,O,F,T' -> Hi, I'd like to refill my Zoloft prescription. | "
-    "'APPOINTMENT, AFTERNOON' -> Hi, I'd like to schedule an appointment in the afternoon."
+    "'HELLO, HOW, YOU' -> Hey! How are you doing? | "
+    "'WANT, COFFEE, LATER' -> Do you want to grab coffee later? | "
+    "'DOCTOR, APPOINTMENT, THURSDAY' -> Hi, I'd like to book an appointment with the doctor for Thursday. | "
+    "'REFILL, Z,O,L,O,F,T' -> Hi, I'd like to refill my Zoloft prescription."
 )
 
 # Fixed verbatim phrases (hero path — mirrors Arav's client/bridge PHRASE map)
