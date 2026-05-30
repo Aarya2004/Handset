@@ -1,21 +1,41 @@
 """
-server/handset_bot.py — HANDSET bot (H1 gate: real Gradium TTS, local playback).
+server/handset_bot.py — HANDSET bot (H2: Gradium TTS → real Twilio phone call).
 
-The real version of Arav's bridge_server.py say()-placeholder. Same WS schema, but
-the verbatim/conduct text is spoken with GRADIUM TTS (the sponsor's voice), played
-locally for now. Next step swaps local playback for a Twilio call to Aarya's phone.
+The bot has two modes controlled by HANDSET_LOCAL_AUDIO=1:
+  - Default (HANDSET_LOCAL_AUDIO unset): signs are spoken onto a live Twilio call
+    via a Pipecat pipeline (FastAPIWebsocketTransport + GradiumTTSService).
+  - Fallback (HANDSET_LOCAL_AUDIO=1): original H1 behaviour — Gradium PCM piped
+    to afplay locally.  This keeps the H1 gate path intact.
 
-Flow (Arav's schema, unchanged so recognizer.js drops in):
+WS schema (unchanged, recognizer.js drops in unchanged):
   client -> bot:  {type:"sign", token, text, mode:"verbatim"|"conduct"}
-  bot   -> client:{type:"spoken", text}            (conduct echoes the sentence)
+  bot -> client:  {type:"spoken", text}
                   {type:"caption", speaker:"aarya", text}   (hearing reply; later)
 
-  verbatim -> speak `text` (fixed string, NO LLM)         — the hero path
-  conduct  -> Nemotron expands tokens -> sentence -> speak — the agent path
-              (copied verbatim from Arav's proven bridge_server.py)
+  verbatim -> speak `text` (fixed string / PHRASE map, NO LLM)   — hero path
+  conduct  -> Nemotron expands tokens -> sentence -> speak         — agent path
 
-Run:  uv run python handset_bot.py        (WS on ws://localhost:8787/signal)
-Test: open the Handset client, or POST a sign via the /say debug route.
+FastAPI routes:
+  WS  /signal       — client sign-stream (port 8790, unchanged)
+  WS  /twilio-media — Twilio bidirectional media stream (Pipecat pipeline endpoint)
+  GET /call         — trigger an outbound call; requires PUBLIC_HOST query param
+                      (or env var PUBLIC_HOST) pointing at the cloudflared tunnel
+  GET /say          — debug: speak a phrase without a WS client
+  GET /health       — liveness probe
+
+Run sequence (full phone-call path):
+  1. Start cloudflared:
+       cloudflared tunnel --url http://localhost:8790
+     Note the assigned hostname, e.g. https://xyz.trycloudflare.com
+
+  2. Start the bot:
+       uv run python handset_bot.py
+
+  3. Trigger the call:
+       curl 'http://localhost:8790/call?public_host=xyz.trycloudflare.com'
+     Twilio calls TWILIO_TO_NUMBER; when it connects, the media stream opens
+     /twilio-media and the Pipecat pipeline starts.  Signs sent on /signal are
+     now spoken down the live phone call.
 """
 
 import asyncio
@@ -30,15 +50,35 @@ import httpx
 import uvicorn
 import websockets
 from dotenv import load_dotenv
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
+from twilio.rest import Client as TwilioClient
+
+from pipecat.frames.frames import TTSSpeakFrame
+from pipecat.pipeline.pipeline import Pipeline
+from pipecat.pipeline.worker import PipelineParams, PipelineWorker
+from pipecat.runner.utils import parse_telephony_websocket
+from pipecat.serializers.twilio import TwilioFrameSerializer
+from pipecat.services.gradium.tts import GradiumTTSService
+from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams, FastAPIWebsocketTransport
+from pipecat.workers.runner import WorkerRunner
 
 load_dotenv(override=True)
+
+# ── Feature flag ─────────────────────────────────────────────────────────────
+# Set HANDSET_LOCAL_AUDIO=1 to keep the original H1 local-afplay path.
+LOCAL_AUDIO = os.getenv("HANDSET_LOCAL_AUDIO", "").strip() == "1"
 
 # ── Gradium TTS (sponsor voice) ──────────────────────────────────────────────
 GRADIUM_URL = "wss://api.gradium.ai/api/speech/tts"
 GRADIUM_KEY = os.environ["GRADIUM_API_KEY"]
 GRADIUM_VOICE = os.getenv("GRADIUM_VOICE_ID", "Eu9iL_CYe8N-Gkx_")
 TTS_SAMPLE_RATE = 48000
+
+# ── Twilio ────────────────────────────────────────────────────────────────────
+TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID", "")
+TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN", "")
+TWILIO_FROM_NUMBER = os.getenv("TWILIO_FROM_NUMBER", "")
+TWILIO_TO_NUMBER = os.getenv("TWILIO_TO_NUMBER", "")
 
 # ── Nemotron conduct (copied from Arav's proven bridge_server.py) ─────────────
 NEMOTRON_URL = os.getenv(
@@ -69,6 +109,11 @@ PHRASE = {
 
 app = FastAPI()
 clients: set[WebSocket] = set()
+
+# ── Pipecat pipeline state ────────────────────────────────────────────────────
+# Module-level reference to the running PipelineWorker so /signal can inject
+# TTSSpeakFrames.  None until /twilio-media receives its first connection.
+_pipeline_worker: PipelineWorker | None = None
 
 
 async def broadcast(obj: dict):
@@ -104,7 +149,7 @@ async def conduct(intent: str) -> str:
         return intent
 
 
-# ── Gradium TTS: text -> PCM bytes (48k mono) ─────────────────────────────────
+# ── Gradium TTS: text -> PCM bytes (48k mono) — used only in LOCAL_AUDIO mode ─
 async def gradium_tts(text: str) -> bytes:
     pcm = bytearray()
     req_id = "handset"
@@ -127,7 +172,7 @@ async def gradium_tts(text: str) -> bytes:
 
 
 def play_pcm_local(pcm: bytes):
-    """Local playback of Gradium PCM (H1). Replaced by Twilio injection next step."""
+    """Local playback of Gradium PCM (H1 fallback). Requires macOS afplay."""
     if not pcm:
         return
     with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
@@ -141,10 +186,161 @@ def play_pcm_local(pcm: bytes):
 
 
 async def speak(text: str):
-    """The seam that becomes 'inject into the Twilio call' later. For now: local."""
+    """Route speech to either the live Twilio call or local afplay (fallback)."""
     print(f"[speak] {text!r}")
-    pcm = await gradium_tts(text)
-    play_pcm_local(pcm)
+    if LOCAL_AUDIO:
+        # H1 fallback: Gradium PCM -> afplay
+        pcm = await gradium_tts(text)
+        play_pcm_local(pcm)
+    else:
+        # H2 path: inject into the Pipecat pipeline -> Twilio call
+        if _pipeline_worker is not None:
+            await _pipeline_worker.queue_frames([TTSSpeakFrame(text=text)])
+        else:
+            print("[speak] WARNING: no active Twilio pipeline worker; falling back to local")
+            pcm = await gradium_tts(text)
+            play_pcm_local(pcm)
+
+
+# ── Twilio media-stream WS endpoint (Pipecat pipeline) ───────────────────────
+@app.websocket("/twilio-media")
+async def twilio_media(ws: WebSocket):
+    """Twilio bidirectional media stream.  Pipecat pipeline: input -> GradiumTTS -> output.
+
+    Twilio calls this endpoint once the outbound call connects.  The pipeline is
+    TTS-only — inbound audio (the hearing person's voice) is received but not
+    processed in this task (no STT/LLM).  We store the running PipelineWorker in
+    _pipeline_worker so the /signal handler can inject TTSSpeakFrames.
+    """
+    global _pipeline_worker
+
+    print("[twilio-media] Twilio connected")
+
+    # Parse the Twilio handshake to get stream_sid and call_sid.
+    _, call_data = await parse_telephony_websocket(ws)
+    stream_sid = call_data["stream_id"]
+    call_sid = call_data["call_id"]
+    print(f"[twilio-media] stream_sid={stream_sid} call_sid={call_sid}")
+
+    serializer = TwilioFrameSerializer(
+        stream_sid=stream_sid,
+        call_sid=call_sid,
+        account_sid=TWILIO_ACCOUNT_SID,
+        auth_token=TWILIO_AUTH_TOKEN,
+    )
+
+    transport = FastAPIWebsocketTransport(
+        websocket=ws,
+        params=FastAPIWebsocketParams(
+            # Twilio media streams are 8 kHz mu-law in both directions.
+            audio_in_enabled=True,
+            audio_out_enabled=True,
+            add_wav_header=False,
+            serializer=serializer,
+        ),
+    )
+
+    tts = GradiumTTSService(
+        api_key=GRADIUM_KEY,
+        settings=GradiumTTSService.Settings(
+            voice=GRADIUM_VOICE,
+        ),
+    )
+
+    # TTS-only pipeline: transport input -> Gradium TTS -> transport output.
+    # No LLM in this pipeline — no double-speak risk.  Inbound 8kHz mu-law
+    # audio from the hearing caller passes through the input processor unused.
+    pipeline = Pipeline([
+        transport.input(),
+        tts,
+        transport.output(),
+    ])
+
+    worker = PipelineWorker(
+        pipeline,
+        params=PipelineParams(
+            # Twilio uses 8 kHz mu-law in both directions.
+            audio_in_sample_rate=8000,
+            audio_out_sample_rate=8000,
+        ),
+        # Disable idle timeout — keep the pipeline alive while waiting for
+        # signs from the Deaf user rather than auto-cancelling on silence.
+        idle_timeout_secs=None,
+    )
+
+    # Expose the worker globally so /signal can inject speech.
+    _pipeline_worker = worker
+
+    @transport.event_handler("on_client_disconnected")
+    async def on_client_disconnected(transport, client):
+        global _pipeline_worker
+        print("[twilio-media] Twilio disconnected")
+        _pipeline_worker = None
+        await worker.cancel()
+
+    runner = WorkerRunner(handle_sigint=False)
+    await runner.add_workers(worker)
+
+    try:
+        await runner.run()
+    finally:
+        _pipeline_worker = None
+        print("[twilio-media] pipeline finished")
+
+
+# ── /call: trigger an outbound Twilio call ────────────────────────────────────
+@app.get("/call")
+async def call(request: Request, public_host: str = ""):
+    """Trigger an outbound call to TWILIO_TO_NUMBER.
+
+    The call TwiML opens a bidirectional media stream to /twilio-media on this
+    server, which the caller reaches via the cloudflared tunnel.
+
+    Usage:
+        curl 'http://localhost:8790/call?public_host=xyz.trycloudflare.com'
+
+    Or set PUBLIC_HOST in the environment and call without the query param:
+        curl 'http://localhost:8790/call'
+    """
+    host = public_host or os.getenv("PUBLIC_HOST", "")
+    if not host:
+        return {
+            "error": "public_host query param or PUBLIC_HOST env var required",
+            "example": "GET /call?public_host=xyz.trycloudflare.com",
+        }
+
+    # Strip any scheme prefix the user might have included.
+    host = host.removeprefix("https://").removeprefix("http://").rstrip("/")
+
+    stream_url = f"wss://{host}/twilio-media"
+    twiml = (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        "<Response>"
+        "<Connect>"
+        f'<Stream url="{stream_url}"/>'
+        "</Connect>"
+        "</Response>"
+    )
+    print(f"[call] Outbound call to {TWILIO_TO_NUMBER} via {stream_url}")
+    print(f"[call] TwiML: {twiml}")
+
+    if not TWILIO_ACCOUNT_SID or not TWILIO_AUTH_TOKEN:
+        return {"error": "TWILIO_ACCOUNT_SID / TWILIO_AUTH_TOKEN not set"}
+    if not TWILIO_FROM_NUMBER or not TWILIO_TO_NUMBER:
+        return {"error": "TWILIO_FROM_NUMBER / TWILIO_TO_NUMBER not set"}
+
+    twilio_client = TwilioClient(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
+    call_obj = twilio_client.calls.create(
+        to=TWILIO_TO_NUMBER,
+        from_=TWILIO_FROM_NUMBER,
+        twiml=twiml,
+    )
+    return {
+        "sid": call_obj.sid,
+        "status": call_obj.status,
+        "to": TWILIO_TO_NUMBER,
+        "stream_url": stream_url,
+    }
 
 
 # ── WS endpoint: Arav's schema ────────────────────────────────────────────────
@@ -176,10 +372,10 @@ async def signal(ws: WebSocket):
         clients.discard(ws)
 
 
-# ── debug HTTP route so we can prove the H1 gate WITHOUT the client ───────────
+# ── debug HTTP route so we can prove speech WITHOUT the client ────────────────
 @app.get("/say")
 async def say(text: str = "Hi, I'd like to book an appointment.", mode: str = "verbatim", token: str = ""):
-    """H1 button-proof: GET /say?text=...  or  /say?mode=conduct&token=APPOINTMENT,T,H,U,R,S,D,A,Y"""
+    """Debug: GET /say?text=...  or  /say?mode=conduct&token=APPOINTMENT,T,H,U,R,S,D,A,Y"""
     if mode == "conduct":
         text = await conduct(token or text)
     await speak(text)
@@ -189,12 +385,37 @@ async def say(text: str = "Hi, I'd like to book an appointment.", mode: str = "v
 
 @app.get("/health")
 def health():
-    return {"ok": True, "clients": len(clients), "tts": "gradium", "voice": GRADIUM_VOICE}
+    return {
+        "ok": True,
+        "clients": len(clients),
+        "tts": "gradium",
+        "voice": GRADIUM_VOICE,
+        "pipeline_active": _pipeline_worker is not None,
+        "local_audio": LOCAL_AUDIO,
+    }
 
 
 if __name__ == "__main__":
-    # NOTE: 8787 is taken by the Quorus MCP server — bot lives on 8790.
-    print("HANDSET bot (H1: Gradium TTS, local playback) on ws://localhost:8790/signal")
-    print("  prove it:  curl 'http://localhost:8790/say?text=Hello%20there'")
-    print("  conduct :  curl 'http://localhost:8790/say?mode=conduct&token=APPOINTMENT,T,H,U,R,S,D,A,Y'")
+    mode_str = "LOCAL afplay (H1)" if LOCAL_AUDIO else "Twilio phone call (H2)"
+    print("=" * 60)
+    print(f"HANDSET bot on ws://localhost:8790/signal  [{mode_str}]")
+    print()
+    print("Routes:")
+    print("  WS  /signal       — sign-stream from recognizer.js")
+    print("  WS  /twilio-media — Twilio bidirectional media stream")
+    print("  GET /call         — trigger outbound call")
+    print("  GET /say          — debug TTS without WS client")
+    print("  GET /health       — liveness probe")
+    print()
+    if LOCAL_AUDIO:
+        print("  H1 mode: HANDSET_LOCAL_AUDIO=1 — speaking locally via afplay")
+        print("  prove it:  curl 'http://localhost:8790/say?text=Hello%20there'")
+    else:
+        print("  H2 mode: speech goes to a live Twilio call")
+        print("  Step 1 — start cloudflared:")
+        print("    cloudflared tunnel --url http://localhost:8790")
+        print("  Step 2 — trigger the call (replace <host> with the tunnel hostname):")
+        print("    curl 'http://localhost:8790/call?public_host=<host>.trycloudflare.com'")
+        print("  Step 3 — send a sign from the Handset client (or use /say for debug)")
+    print("=" * 60)
     uvicorn.run(app, host="0.0.0.0", port=8790, log_level="warning")
