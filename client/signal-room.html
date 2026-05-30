@@ -196,7 +196,7 @@ function showPicker(top3){
 /* ---- wire Arav's recognizer into the UI ---- */
 const rec = createRecognizer({
   video: $('video'),
-  bridgeUrl: 'ws://localhost:8787/signal',
+  bridgeUrl: 'ws://localhost:8790/signal',  // 8787 is Quorus; Handset bot is on 8790
   on: {
     ready(){ $('stage').classList.add('ready'); sizeCanvasToVideo(); renderVocab(rec.getLexicon ? (rec.getLexicon()||[]) : []); },
     frame(lm){ drawLandmarks(lm); },
