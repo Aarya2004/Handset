@@ -541,6 +541,17 @@
         transform: translateY(-1px);
         background: var(--paper-2);
       }
+      .ctl.motion {
+        border-color: rgba(95, 122, 91, 0.38);
+        color: var(--sage-deep);
+        background: var(--sage-soft);
+      }
+      .ctl.motion.busy {
+        pointer-events: none;
+        color: var(--bone);
+        background: var(--sage);
+        border-color: var(--sage);
+      }
       .ctl svg {
         width: 19px;
         height: 19px;
@@ -1224,6 +1235,7 @@
             <div class="controls">
               <button class="ctl" title="Mute"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/></svg></button>
               <button class="ctl" title="Camera"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2"/></svg></button>
+              <button class="ctl motion" id="motionSign" title="Read motion sign with NVIDIA VLM"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12h4l3-8 6 16 3-8h4"/><path d="M4 20v-3M4 7V4M20 20v-3M20 7V4"/></svg></button>
               <button class="ctl" title="Transcript"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h8M8 17h5"/></svg></button>
               <button class="ctl end" id="endCall" title="End call"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7 2 2 0 0 1 1.72 2v3a2 2 0 0 1-2.18 2A19.79 19.79 0 0 1 3.07 8.63 19.5 19.5 0 0 1 0 .18"/><line x1="22" x2="2" y1="2" y2="22"/></svg></button>
             </div>
@@ -1359,175 +1371,26 @@
     </div>
 
     <script type="module">
-      import {
-        HandLandmarker,
-        FilesetResolver,
-      } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs";
-
-      // ---------- tunables ----------
-      const HOLD_VEL = 0.018; // below this avg landmark velocity => "held"
-      const HOLD_FRAMES = 5; // consecutive held frames before commit
-      const ACCEPT = 0.85,
-        ASK = 0.55; // confidence gates
-      const TAU = 0.55; // distance scale for confidence
-      const COOLDOWN = 1200; // ms between same-token emissions
-      const CAP_FRAMES = 5; // frames captured per enrollment
-
-      // ---------- state ----------
-      let landmarker,
-        video,
-        overlay,
-        ctx,
-        lastVideoTime = -1;
-      let recentVecs = []; // rolling normalized vectors
-      let heldCount = 0,
-        heldStartT = 0;
-      let lastEmit = { token: null, t: 0 };
-      let profile = loadProfile(); // { label: [vec,vec,...] }
-      let enroll = null; // {label, frames:[]}
+      // ════════════════ RECOGNITION: Arav's recognizer.js is the single source ═══
+      // The UI imports createRecognizer() and renders purely from its callbacks.
+      // No inline MediaPipe/k-NN here anymore — recognizer.js owns recognition,
+      // sentence-buffering (signs accumulate -> 1.5s pause -> Nemotron forms one
+      // sentence), the seed sign-library, and the blocker fixes. We only render.
+      import { createRecognizer } from "./recognizer.js";
 
       const $ = (id) => document.getElementById(id);
 
-      // ---------- landmark normalization (translate to wrist, scale by wrist->mid-MCP) ----------
-      function normalize(lm) {
-        const wrist = lm[0],
-          midMcp = lm[9];
-        const sx = midMcp.x - wrist.x,
-          sy = midMcp.y - wrist.y,
-          sz = (midMcp.z || 0) - (wrist.z || 0);
-        let scale = Math.hypot(sx, sy, sz) || 1e-6;
-        const v = new Float32Array(63);
-        for (let i = 0; i < 21; i++) {
-          v[i * 3] = (lm[i].x - wrist.x) / scale;
-          v[i * 3 + 1] = (lm[i].y - wrist.y) / scale;
-          v[i * 3 + 2] = ((lm[i].z || 0) - (wrist.z || 0)) / scale;
-        }
-        return v;
-      }
-      function dist(a, b) {
-        let s = 0;
-        for (let i = 0; i < 63; i++) {
-          const d = a[i] - b[i];
-          s += d * d;
-        }
-        return Math.sqrt(s);
-      }
-      function velocity(a, b) {
-        if (!a || !b) return 1;
-        return dist(a, b) / Math.sqrt(63);
-      }
-
-      // 1-NN over all prototypes -> {token, conf}
-      function classify(v) {
-        let best = null,
-          bestD = Infinity;
-        for (const [label, protos] of Object.entries(profile)) {
-          for (const p of protos) {
-            const d = dist(v, p);
-            if (d < bestD) {
-              bestD = d;
-              best = label;
-            }
-          }
-        }
-        if (best === null) return { token: null, conf: 0, d: Infinity };
-        const conf = Math.max(0, Math.min(1, 1 - bestD / TAU));
-        return { token: best, conf, d: bestD };
-      }
-
-      // ---------- persistence ----------
-      function loadProfile() {
-        try {
-          const o = JSON.parse(localStorage.getItem("signal_profile") || "{}");
-          const out = {};
-          for (const k in o) out[k] = o[k].map((a) => Float32Array.from(a));
-          return out;
-        } catch {
-          return {};
-        }
-      }
-      function saveProfile() {
-        const o = {};
-        for (const k in profile) o[k] = profile[k].map((a) => Array.from(a));
-        localStorage.setItem("signal_profile", JSON.stringify(o));
-      }
-
-      // ---------- bridge to the bot (real WebSocket, H1) ----------
-      // ?bridge=wss://<tunnel>/signal lets a remote signer (Arav) point at the
-      // host running handset_bot.py without editing this file. Defaults to the
-      // Handset bot on 8790 (8787 is the old bridge_server / Quorus port).
+      // ?bridge=wss://<tunnel>/signal lets a remote signer point at the host
+      // running handset_bot.py without editing this file. Default = Handset bot 8790.
       const BRIDGE_URL =
         new URLSearchParams(location.search).get("bridge") ||
         "ws://localhost:8790/signal";
-      let bridge = null;
-      function connectBridge() {
-        try {
-          bridge = new WebSocket(BRIDGE_URL);
-          bridge.onopen = () => {
-            $("spark").classList.add("ok");
-            $("sparkTxt").textContent = "connected · sign to speech is live";
-          };
-          bridge.onclose = () => {
-            $("spark").classList.remove("ok");
-            $("sparkTxt").textContent = "offline · run bridge_server.py";
-            setTimeout(connectBridge, 2000);
-          };
-          bridge.onmessage = (e) => {
-            const m = JSON.parse(e.data);
-            if (m.type === "caption")
-              pushCaption("them", m.text); // hearing party reply
-            else if (m.type === "spoken") pushCaption("you", m.text); // conduct result (agent's sentence)
-          };
-        } catch (e) {}
-      }
-      async function speakOnCall(token, sentence) {
-        const text = sentence || token.toLowerCase();
-        pushCaption("you", text);
-        fireWave();
-        if (bridge && bridge.readyState === 1)
-          bridge.send(
-            JSON.stringify({ type: "sign", token, text, mode: "verbatim" }),
-          );
-        console.log("[BRIDGE] sign ->", token, "|", text);
-      }
-      // the AGENT path: send raw signed intent -> Nemotron expands it -> spoken.
-      // The agent's actual sentence comes back via the "spoken" echo.
-      function conductIntent(intent) {
-        fireWave();
-        if (bridge && bridge.readyState === 1)
-          bridge.send(
-            JSON.stringify({ type: "sign", token: intent, mode: "conduct" }),
-          );
-        console.log("[BRIDGE] conduct ->", intent);
-      }
-      window.conductIntent = conductIntent;
+      const VLM_URL =
+        new URLSearchParams(location.search).get("vlm") ||
+        "http://localhost:8788/recognize-omni";
+      const DYNAMIC_VOCAB = ["THANK-YOU", "YES", "NO", "HELLO", "WAIT", "REPEAT"];
 
-      // recent conversation context (last few captions) for disambiguation
-      let recentContext = [];
-      function pushContext(who, text) {
-        const tag = who === "you" ? "ME" : "AARYA";
-        recentContext.push(`${tag}: ${text}`);
-        while (recentContext.length > 4) recentContext.shift();
-      }
-
-      // the DISAMBIGUATE path: recognizer is UNSURE -> hand Nemotron the top-3
-      // candidates + call context, let it pick the right sign and expand it.
-      // The resolved sentence comes back via the "spoken" echo.
-      function disambiguateSign(candidates) {
-        fireWave();
-        if (bridge && bridge.readyState === 1)
-          bridge.send(
-            JSON.stringify({
-              type: "sign",
-              mode: "disambiguate",
-              candidates, // [[label, conf], ...]
-              context: recentContext.slice(),
-            }),
-          );
-        console.log("[BRIDGE] disambiguate ->", candidates);
-      }
-      window.disambiguateSign = disambiguateSign;
-      // canonical phrases for the demo vocab (verbatim hero path, no LLM)
+      // canonical phrases for the demo hotkeys (silent insurance path only)
       const PHRASE = {
         HELLO: "Hi there.",
         APPOINTMENT: "Hi, I'd like to book an appointment.",
@@ -1541,159 +1404,170 @@
         WATER: "water",
       };
 
-      // ---------- recognition loop ----------
-      function loop() {
-        if (!landmarker) {
-          requestAnimationFrame(loop);
+      // recent conversation context (last few captions) — kept for caption history
+      let recentContext = [];
+      function pushContext(who, text) {
+        const tag = who === "you" ? "ME" : "AARYA";
+        recentContext.push(`${tag}: ${text}`);
+        while (recentContext.length > 4) recentContext.shift();
+      }
+
+      // ---- landmark overlay: drawn from recognizer's frame(lm) callback ----
+      let video, overlay, ctx;
+      const CONN = [
+        [0, 1], [1, 2], [2, 3], [3, 4], [0, 5], [5, 6], [6, 7], [7, 8],
+        [5, 9], [9, 10], [10, 11], [11, 12], [9, 13], [13, 14], [14, 15], [15, 16],
+        [13, 17], [17, 18], [18, 19], [19, 20], [0, 17],
+      ];
+      function drawLandmarks(lm) {
+        if (!ctx) return;
+        ctx.clearRect(0, 0, overlay.width, overlay.height);
+        if (video.readyState >= 2) ctx.drawImage(video, 0, 0, overlay.width, overlay.height);
+        if (!lm || !lm.length) {
+          $("stage").classList.remove("hot");
           return;
         }
-        const now = performance.now();
-        if (video.currentTime !== lastVideoTime) {
-          lastVideoTime = video.currentTime;
-          const res = landmarker.detectForVideo(video, now);
-          draw(res);
-          if (res.landmarks && res.landmarks.length) {
-            const v = normalize(res.landmarks[0]);
-            const vel = velocity(v, recentVecs[recentVecs.length - 1]);
-            recentVecs.push(v);
-            if (recentVecs.length > 8) recentVecs.shift();
-
-            if (enroll) {
-              handleEnroll(v, vel);
-            } else {
-              handleRecognize(v, vel, now);
-            }
-          } else {
-            heldCount = 0;
-            $("stage").classList.remove("hot");
-            if (!enroll) $("reading").textContent = "Show your hand to begin…";
-          }
+        ctx.strokeStyle = "rgba(95,122,91,.85)";
+        ctx.lineWidth = 4;
+        for (const [a, b] of CONN) {
+          ctx.beginPath();
+          ctx.moveTo(lm[a].x * overlay.width, lm[a].y * overlay.height);
+          ctx.lineTo(lm[b].x * overlay.width, lm[b].y * overlay.height);
+          ctx.stroke();
         }
-        requestAnimationFrame(loop);
+        ctx.fillStyle = "#fbfaf6";
+        ctx.strokeStyle = "rgba(63,86,64,.9)";
+        ctx.lineWidth = 1.5;
+        for (const p of lm) {
+          ctx.beginPath();
+          ctx.arc(p.x * overlay.width, p.y * overlay.height, 4, 0, 7);
+          ctx.fill();
+          ctx.stroke();
+        }
       }
 
-      function avgRecent(n = 3) {
-        const k = Math.min(n, recentVecs.length);
-        if (!k) return null;
-        const out = new Float32Array(63);
-        for (let i = recentVecs.length - k; i < recentVecs.length; i++)
-          for (let j = 0; j < 63; j++) out[j] += recentVecs[i][j];
-        for (let j = 0; j < 63; j++) out[j] /= k;
-        return out;
-      }
-
-      function handleRecognize(v, vel, now) {
-        const stable = vel < HOLD_VEL;
-        if (stable) {
-          if (heldCount === 0) heldStartT = now;
-          heldCount++;
-        } else {
-          heldCount = 0;
-        }
-        $("stage").classList.toggle("hot", heldCount >= HOLD_FRAMES);
-
-        const probe = avgRecent(3) || v;
-        const { token, conf } = classify(probe);
-        // live read-out
+      // the live recognition readout pill (recognizer.reading callback)
+      function showReading(token, conf) {
         $("reading").innerHTML = token
           ? `recognizing <span class="tok">${token}</span><span class="conf">${(conf * 100).toFixed(0)}%</span>`
           : `<span style="color:var(--ink-faint)">no match yet — teach this sign</span>`;
+      }
+      // signs accumulating into the current sentence (recognizer.word callback)
+      function showBuffer(buf) {
+        if (!buf || !buf.length) return;
+        const nice = buf.map((t) => t.charAt(0) + t.slice(1).toLowerCase()).join(" · ");
+        $("reading").innerHTML = `<span class="tok">${nice}</span><span class="conf">forming…</span>`;
+      }
 
-        if (heldCount >= HOLD_FRAMES && token) {
-          if (conf >= ACCEPT) {
-            if (!(lastEmit.token === token && now - lastEmit.t < COOLDOWN)) {
-              const ms = Math.round(now - heldStartT);
-              $("recms").innerHTML = ms + "<small> ms</small>";
-              lastEmit = { token, t: now };
-              heldCount = 0;
-              flashChip(token);
-              speakOnCall(token, PHRASE[token] || token.toLowerCase());
-            }
-          } else if (conf >= ASK) {
-            // 0.55–0.85: unsure. Let Nemotron pick from top-3 + call context.
-            if (!(lastEmit.token === token && now - lastEmit.t < COOLDOWN)) {
-              lastEmit = { token, t: now };
-              heldCount = 0;
-              $("reading").innerHTML =
-                `<span style="color:var(--clay)">unsure — asking the agent…</span>`;
-              flashChip(token);
-              disambiguateSign(topK(probe, 3));
-            }
-          }
+      let motionBusy = false;
+      function setMotionBusy(on) {
+        motionBusy = on;
+        $("motionSign").classList.toggle("busy", on);
+      }
+      async function readMotionSign() {
+        if (motionBusy || !rec?.readMotionSign) return;
+        setMotionBusy(true);
+        $("reading").innerHTML = `<span style="color:var(--sage-deep)">reading motion…</span>`;
+        try {
+          await rec.readMotionSign();
+        } finally {
+          setMotionBusy(false);
         }
       }
 
-      // top-3 candidates for the ambiguous band
-      function topK(v, k = 3) {
-        const arr = [];
-        for (const [label, protos] of Object.entries(profile)) {
-          let b = Infinity;
-          for (const p of protos) b = Math.min(b, dist(v, p));
-          arr.push([label, b]);
-        }
-        arr.sort((a, b) => a[1] - b[1]);
-        // return [label, confidence] using the same TAU-based conf scale
-        return arr.slice(0, k).map(([label, d]) => [
-          label,
-          Math.max(0, Math.min(1, 1 - d / TAU)),
-        ]);
+      // ---- the recognizer: built in boot() once the <video> exists (recognizer.js
+      //      attaches the camera to that exact element). All UI renders from callbacks.
+      let rec;
+      function makeRecognizer(videoEl) {
+        rec = createRecognizer({
+        video: videoEl,
+        bridgeUrl: BRIDGE_URL,
+        vlmUrl: VLM_URL,
+        dynamicVocab: DYNAMIC_VOCAB,
+        on: {
+          ready() {
+            $("loading").style.display = "none";
+            $("spark").classList.add("ok");
+            $("sparkTxt").textContent = "connected · sign to speech is live";
+            renderChips();
+          },
+          frame(lm) { drawLandmarks(lm); $("stage").classList.toggle("hot", !!(lm && lm.length)); },
+          reading(token, conf) { showReading(token, conf); },
+          sign(token, conf, latencyMs) {
+            if (latencyMs) $("recms").innerHTML = latencyMs + "<small> ms</small>";
+            flashChip(token);
+            fireWave();
+          },
+          word(token, buf) { showBuffer(buf); },
+          sentence(intent) {
+            $("reading").innerHTML = `<span style="color:var(--clay)">forming sentence…</span>`;
+          },
+          motion(state, data = {}) {
+            if (state === "capturing") {
+              $("reading").innerHTML = `<span style="color:var(--sage-deep)">reading motion…</span>`;
+            } else if (state === "reading") {
+              setMotionBusy(true);
+            } else if (state === "recognized") {
+              setMotionBusy(false);
+              const sign = String(data.sign || "").toUpperCase();
+              const conf = Number(data.confidence || 0);
+              $("reading").innerHTML = `<span class="tok">${sign}</span><span class="conf">${Math.round(conf * 100)}%</span>`;
+              if (data.latencyMs) $("recms").innerHTML = data.latencyMs + "<small> ms</small>";
+            } else if (state === "unclear") {
+              setMotionBusy(false);
+              $("reading").innerHTML = `<span style="color:var(--clay)">motion unclear — try once more</span>`;
+            } else if (state === "error") {
+              setMotionBusy(false);
+              $("reading").innerHTML = `<span style="color:var(--clay)">motion reader unavailable</span>`;
+            }
+          },
+          spoken(text) { pushCaption("you", text); },     // agent's spoken sentence -> YOU
+          caption(text) { pushCaption("them", text); },   // hearing party reply -> THEM
+          ambiguous(top3) { showGate(top3); },
+          learned(label, count) {
+            renderChips(); flashChip(label);
+            if (rec._teachResolve) { rec._teachResolve(label); rec._teachResolve = null; }
+          },
+          bridge(connected) {
+            $("spark").classList.toggle("ok", connected);
+            $("sparkTxt").textContent = connected
+              ? "connected · sign to speech is live"
+              : "offline · start handset_bot.py";
+            setCall(connected);
+          },
+          error(msg) { console.warn("[recognizer]", msg); },
+        },
+        });
+        window.rec = rec;
+        return rec;
       }
+
+      // top-3 ambiguous picker -> rec.confirm(label) (recognizer stores the correction)
       let gateShown = 0;
-      function showGate(v) {
+      function showGate(top3) {
         if (performance.now() - gateShown < 2000) return;
         gateShown = performance.now();
         const g = $("gate");
         g.innerHTML = "";
-        for (const [label] of topK(v, 3)) {
+        (top3 || []).forEach((entry) => {
+          const label = Array.isArray(entry) ? entry[0] : entry;
           const b = document.createElement("button");
           b.textContent = label;
           b.onclick = () => {
-            profile[label].push(v);
-            saveProfile();
+            rec.confirm(label);
             g.innerHTML = "";
-            renderChips();
-            toast(`Learned ${label}`);
-            speakOnCall(label, PHRASE[label] || label.toLowerCase());
           };
           g.appendChild(b);
-        }
-        setTimeout(() => {
-          if (g.firstChild) g.innerHTML = "";
-        }, 4000);
-      }
-
-      // ---------- enrollment (the self-improvement star) ----------
-      function handleEnroll(v, vel) {
-        $("reading").innerHTML =
-          `<span style="color:var(--clay)">hold "${enroll.label}" steady…</span>`;
-        if (vel < HOLD_VEL && enroll.frames.length < CAP_FRAMES) {
-          enroll.frames.push(v);
-          $("mCount").textContent = `${enroll.frames.length} / ${CAP_FRAMES}`;
-          if (enroll.frames.length === CAP_FRAMES) {
-            commitEnroll();
-          }
-        }
-      }
-      function commitEnroll() {
-        const proto = new Float32Array(63);
-        for (const f of enroll.frames)
-          for (let j = 0; j < 63; j++) proto[j] += f[j];
-        for (let j = 0; j < 63; j++) proto[j] /= enroll.frames.length;
-        if (!profile[enroll.label]) profile[enroll.label] = [];
-        profile[enroll.label].push(proto);
-        saveProfile();
-        const label = enroll.label;
-        enroll = null;
-        closeModal();
-        renderChips();
-        toast(`${label} added to your vocabulary`);
+        });
+        setTimeout(() => { if (g.firstChild) g.innerHTML = ""; }, 4000);
       }
 
       // ---------- UI ----------
       function renderChips() {
         const c = $("chips");
         c.innerHTML = "";
-        const labels = Object.keys(profile);
+        // labels come from the recognizer's profile (seed library + taught signs)
+        const labels = Object.keys(rec.getProfile ? rec.getProfile() : {});
         $("count").textContent = `${labels.length}`;
         for (const label of labels) {
           const d = document.createElement("div");
@@ -1762,21 +1636,22 @@
         $("modal").classList.remove("show");
       }
       $("teachBtn").onclick = openModal;
-      $("mCancel").onclick = () => {
-        enroll = null;
-        closeModal();
-      };
+      $("mCancel").onclick = () => closeModal();
       $("mStart").onclick = () => {
         const label = $("mInput")
           .value.trim()
           .toUpperCase()
           .replace(/\s+/g, "-");
         if (!label) return $("mInput").focus();
-        enroll = { label, frames: [] };
+        // hand enrollment to the recognizer; it captures frames + emits "learned"
+        rec.teachSign(label);
         $("mInput").style.display = "none";
         $("mCount").style.display = "";
-        $("mCount").textContent = `0 / ${CAP_FRAMES}`;
-        $("mStart").textContent = "Hold the sign…";
+        $("mCount").textContent = "hold the sign steady…";
+        $("mStart").textContent = "Capturing…";
+        // recognizer fires learned() when done -> we re-render chips + close
+        const done = (l) => { closeModal(); toast(`${l} added to your vocabulary`); };
+        rec._teachResolve = done; // picked up by the learned() callback below
       };
 
       // demo helpers: staged-input hotkeys 1-8 (silent insurance) + call state
@@ -1790,28 +1665,26 @@
         "CANCEL",
         "WATER",
       ];
+      // hotkeys are SILENT DEMO INSURANCE — they drive the real recognizer paths
+      // (rec.conductIntent) so a key press is indistinguishable from a real sign.
       window.addEventListener("keydown", (e) => {
         if (e.target && e.target.tagName === "INPUT") return;
         if (e.key >= "1" && e.key <= "8") {
           const t = DEMO[+e.key - 1];
-          speakOnCall(t, PHRASE[t] || t.toLowerCase());
+          rec.conductIntent(t); // -> Nemotron -> spoken on the call (caption arrives via on.spoken)
           flashChip(t);
           $("recms").innerHTML =
             180 + Math.floor(Math.random() * 60) + "<small> ms</small>";
         }
-        if (e.key === "c") {
-          setCall(true);
-        } // toggle "call live"
+        if (e.key === "c") setCall(true); // mark call live
         if (e.key === "a") {
-          pushCaption(
-            "them",
-            prompt("Aarya says:") || "Sure — what day works?",
-          );
+          pushCaption("them", prompt("Aarya says:") || "Sure — what day works?");
         }
         if (e.key === "x") {
-          // demo: the AGENT path — raw noisy signs -> Nemotron -> natural sentence
-          conductIntent("APPOINTMENT, T,H,U,R,Z,D,A,Y");
+          // the AGENT path — raw noisy signed intent -> Nemotron -> natural sentence
+          rec.conductIntent("APPOINTMENT, T,H,U,R,Z,D,A,Y");
         }
+        if (e.key === "v") readMotionSign();
       });
       function setCall(on) {
         $("status").classList.toggle("live", on);
@@ -1819,9 +1692,9 @@
       }
       window.setCall = setCall;
       window.pushCaption = pushCaption;
-      window.profile = profile;
       $("newCall").onclick = () => setCall(true);
       $("endCall").onclick = () => setCall(false);
+      $("motionSign").onclick = () => readMotionSign();
 
       // ════════════════ view router + analytics views ════════════════
       // Dummy-but-believable data for Vocabulary / Insights / History. These are
@@ -2061,87 +1934,22 @@
         a.addEventListener("click", () => switchView(a.dataset.view)));
 
       // ---------- boot ----------
+      // recognizer.js owns the camera + recognition; we own the canvas + UI. We
+      // build the recognizer with our <video>, set up the overlay, then start it.
       async function boot() {
         try {
           video = $("video");
           overlay = $("overlay");
           ctx = overlay.getContext("2d");
-          const fs = await FilesetResolver.forVisionTasks(
-            "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm",
-          );
-          landmarker = await HandLandmarker.createFromOptions(fs, {
-            baseOptions: {
-              modelAssetPath:
-                "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
-              delegate: "GPU",
-            },
-            runningMode: "VIDEO",
-            numHands: 1,
-          });
-          const stream = await navigator.mediaDevices.getUserMedia({
-            video: { width: 960, height: 720 },
-          });
-          video.srcObject = stream;
-          await new Promise((r) => (video.onloadeddata = r));
-          $("loading").style.display = "none";
-          renderChips();
-          connectBridge();
-          loop();
+          makeRecognizer(video);   // construct rec bound to our <video>
+          renderChips();           // seed library may be empty until ready(); refreshed on ready()
+          await rec.start();       // attaches camera, connects bridge, emits ready()
         } catch (err) {
           $("loading").innerHTML =
             "⚠ " +
-            err.message +
+            (err?.message || err) +
             "<br><small>allow camera + serve over http(s)</small>";
           console.error(err);
-        }
-      }
-
-      // landmark drawing (manual; mirrored canvas)
-      const CONN = [
-        [0, 1],
-        [1, 2],
-        [2, 3],
-        [3, 4],
-        [0, 5],
-        [5, 6],
-        [6, 7],
-        [7, 8],
-        [5, 9],
-        [9, 10],
-        [10, 11],
-        [11, 12],
-        [9, 13],
-        [13, 14],
-        [14, 15],
-        [15, 16],
-        [13, 17],
-        [17, 18],
-        [18, 19],
-        [19, 20],
-        [0, 17],
-      ];
-      function draw(res) {
-        ctx.clearRect(0, 0, overlay.width, overlay.height);
-        ctx.drawImage(video, 0, 0, overlay.width, overlay.height);
-        if (!res.landmarks) return;
-        for (const lm of res.landmarks) {
-          ctx.strokeStyle = "rgba(95,122,91,.85)";
-          ctx.lineWidth = 4;
-          for (const [a, b] of CONN) {
-            ctx.beginPath();
-            ctx.moveTo(lm[a].x * overlay.width, lm[a].y * overlay.height);
-            ctx.lineTo(lm[b].x * overlay.width, lm[b].y * overlay.height);
-            ctx.stroke();
-          }
-          ctx.fillStyle = "#fbfaf6";
-          ctx.strokeStyle = "rgba(63,86,64,.9)";
-          ctx.lineWidth = 1.5;
-          for (const p of lm) {
-            ctx.beginPath();
-            ctx.arc(p.x * overlay.width, p.y * overlay.height, 4, 0, 7);
-            ctx.fill();
-            ctx.stroke();
-          }
         }
       }
 
