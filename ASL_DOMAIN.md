@@ -96,6 +96,49 @@ Signs differing in exactly one parameter. Examples:
 > center-normalize away spatial endpoints. Noun/verb and aspect distinctions are movement-only
 > minimal pairs. Classifier predicates can't be enumerated by a closed set — out of scope for us.
 
+### Segmentation: when is a sign "done"? (boundary cues, most→least reliable)
+The crux of any commit/segmentation design. **There is no reliable clean pause between signs in
+fluent signing** — boundaries are *inferred*, not pre-marked. Cues, ordered:
+
+1. **Movement–Hold structure (the one good cue).** Liddell & Johnson's Movement-Hold model:
+   signs decompose into **Movements** (hand transitioning/articulating) and **Holds** (hand
+   momentarily static at a target). A canonical sign is often Hold–Movement–Hold or
+   Movement–Hold. The **terminal hold** — handshape, location, *and* orientation all stop
+   changing simultaneously, velocity → ~0 — is the closest thing to "the sign is done."
+2. **Movement epenthesis = the transition, NOT a pause.** Between sign A and sign B the hands
+   must travel from A's end-location to B's start-location. This transition *looks* like signing
+   but is meaningless, and **the hands keep moving through it — they do not stop.** So "hands
+   moving" ≠ "a sign is happening", and "**hands stopped**" is a far better boundary signal than
+   any gap. Usually **there is no gap.**
+3. **Hold deletion under fluency.** Citation/careful signing has perceptible terminal holds;
+   fast connected signing shortens or deletes them (esp. compounds: MOTHER^FATHER = "parents"
+   elides the boundary hold). The cleanest cue is the first thing fluency erodes.
+4. **Prosodic / non-manual boundaries** (phrase-level, not sign-level): eye blinks cluster at
+   clause boundaries (≈ breaths in speech), plus hold-lengthening, head nod, brow change, body
+   shift, hands-to-rest. These mark **phrase edges, not every sign-to-sign boundary** — and
+   they're on the **face**, which MediaPipe Hands can't see.
+5. **Reduplication is internal, not a boundary.** Some signs are inherently repeated (a
+   two-bounce sign). That repetition is **one sign, not two** — a naive "stopped→restarted = new
+   sign" heuristic will wrongly split it.
+
+**Honest answer to "when is a sign done?":** a **velocity minimum / sustained hold** (handshape +
+location + orientation all stop changing for a brief window). A gap/pause is the *exception*
+(deliberate/didactic signing), not the rule. This is exactly why CSLR is hard and nobody gets
+clean boundaries for free.
+
+> **Implication for Handset:** Our **hold-to-commit, isolated-sign regime is the linguistically
+> correct scope** — in it the user naturally produces a terminal hold, so velocity-threshold
+> segmentation works (`HOLD_VEL` for static commit, `MOTION_VEL` for the dynamic/VLM burst). Do
+> **not** attempt fluent-connected segmentation (that's CSLR, ~19% WER in research). Refinements
+> that follow directly: (a) require a **dwell** — velocity below threshold for N consecutive
+> frames — so *movement epenthesis* slowdowns don't false-commit; (b) gate the commit on
+> **handshape stability** (finger-joint angles stopped changing), not landmark velocity alone, to
+> separate "moving slowly to the next sign" from "arrived and holding"; (c) keep the motion
+> cooldown so a reduplicated sign isn't split into two commits; (d) a **motion sign = velocity
+> rise out of rest → trajectory → fall into hold** — that rise→fall window is exactly what to
+> send to the VLM. We're blind to face-based phrase boundaries — fine, because we segment *intent
+> tokens* and the conduct LLM reassembles grammar afterward.
+
 ### Syntax: topic-comment, flexible word order, grammar of space
 Baseline SVO but OSV common under topicalization; **Time + Topic + Comment**. Order is
 disambiguated by **non-manual marking**, not position. Signers set up **referent loci** in
