@@ -36,6 +36,14 @@ const PAUSE_MS = 1500; // ms with no new sign before buffered signs become ONE s
 const MAX_WORDS = 8; // hard cap — commit even without a pause (prevents never-commit on fluent signing)
 const MAX_SENTENCE_MS = 6000; // hard cap — commit after this long even if signs keep coming
 const CAP_FRAMES = 5; // frames captured per enrollment
+const MOTION_VEL = 0.04; // above this avg landmark velocity => dynamic sign candidate
+const MOTION_MIN_MS = 240;
+const MOTION_SETTLE_MS = 260;
+const MOTION_FRAME_GAP = 180;
+const MOTION_MAX_FRAMES = 4;
+const MOTION_COOLDOWN = 2800;
+const MOTION_TIMEOUT_MS = 2200;
+const MOTION_MIN_CONF = 0.55;
 
 const WASM =
   "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm";
@@ -58,6 +66,9 @@ const PHRASE = {
 export function createRecognizer({
   video,
   bridgeUrl = "ws://localhost:8787/signal",
+  vlmUrl = "http://localhost:8788/recognize-omni",
+  dynamicRecognition = true,
+  dynamicVocab = ["THANK-YOU", "YES", "NO", "HELLO", "WAIT", "REPEAT"],
   on = {},
 } = {}) {
   const emit = (name, ...a) => {
@@ -210,6 +221,126 @@ export function createRecognizer({
     return false; // caller can keep the payload + retry instead of silently dropping it
   };
 
+  // ---------- motion signs: landmark burst -> VLM -> same sentence buffer ----------
+  let motion = {
+    active: false,
+    busy: false,
+    frames: [],
+    startedAt: 0,
+    lastMoveAt: 0,
+    lastFrameAt: 0,
+    cooldownUntil: 0,
+    suppressUntil: 0,
+  };
+  function captureFrame() {
+    const vw = video.videoWidth || 960;
+    const vh = video.videoHeight || 720;
+    if (!vw || !vh) return null;
+    const maxW = 512;
+    const scale = Math.min(1, maxW / vw);
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(vw * scale);
+    canvas.height = Math.round(vh * scale);
+    const ctx = canvas.getContext("2d", { alpha: false });
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    return canvas.toDataURL("image/jpeg", 0.72);
+  }
+  function addMotionFrame(now) {
+    if (now - motion.lastFrameAt < MOTION_FRAME_GAP) return;
+    const frame = captureFrame();
+    if (!frame) return;
+    motion.frames.push(frame);
+    if (motion.frames.length > MOTION_MAX_FRAMES) motion.frames.shift();
+    motion.lastFrameAt = now;
+  }
+  async function postMotionFrames(frames) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), MOTION_TIMEOUT_MS);
+    try {
+      const res = await fetch(vlmUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ frames, vocab: dynamicVocab }),
+        signal: controller.signal,
+      });
+      if (!res.ok) throw new Error(`VLM ${res.status}`);
+      return await res.json();
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  async function classifyMotion(frames) {
+    if (motion.busy || frames.length < 2) return;
+    motion.busy = true;
+    const t0 = performance.now();
+    emit("motion", "reading", { frames: frames.length });
+    try {
+      const result = await postMotionFrames(frames);
+      const token = String(result.sign || "UNKNOWN").toUpperCase();
+      const conf = Number(result.confidence ?? 0);
+      const latency = Math.round(performance.now() - t0);
+      if (!dynamicVocab.includes(token) || token === "UNKNOWN" || conf < MOTION_MIN_CONF) {
+        emit("motion", "unclear", { ...result, latencyMs: latency });
+        return;
+      }
+      heldCount = 0;
+      lastSign = null;
+      bufferSign(token, conf, latency);
+      emit("motion", "recognized", { ...result, latencyMs: latency });
+    } catch (err) {
+      emit("motion", "error", err);
+    } finally {
+      motion.busy = false;
+      motion.cooldownUntil = performance.now() + MOTION_COOLDOWN;
+    }
+  }
+  function trackMotion(vel, now) {
+    if (!dynamicRecognition || enroll || now < motion.cooldownUntil || motion.busy) {
+      return now < motion.suppressUntil;
+    }
+    const moving = vel > MOTION_VEL;
+    if (moving) {
+      if (!motion.active) {
+        motion.active = true;
+        motion.frames = [];
+        motion.startedAt = now;
+        motion.lastFrameAt = 0;
+        emit("motion", "capturing", {});
+      }
+      motion.lastMoveAt = now;
+      motion.suppressUntil = now + MOTION_SETTLE_MS + 120;
+      heldCount = 0;
+      lastSign = null;
+      addMotionFrame(now);
+      return true;
+    }
+    if (motion.active) {
+      addMotionFrame(now);
+      if (now - motion.lastMoveAt >= MOTION_SETTLE_MS) {
+        const frames = motion.frames.slice();
+        const duration = now - motion.startedAt;
+        motion.active = false;
+        motion.frames = [];
+        motion.suppressUntil = now + 180;
+        const probe = avgRecent(3);
+        const staticRead = probe ? classify(probe) : { token: null, conf: 0 };
+        if (
+          staticRead.token &&
+          staticRead.conf >= ACCEPT &&
+          !dynamicVocab.includes(staticRead.token)
+        ) {
+          motion.suppressUntil = 0;
+          return false;
+        }
+        if (duration >= MOTION_MIN_MS && frames.length >= 2) {
+          void classifyMotion(frames);
+        }
+      }
+      return true;
+    }
+    return now < motion.suppressUntil;
+  }
+
   // ---------- sentence buffering: accumulate signs -> pause -> Nemotron forms a sentence ----------
   let sentBuf = [],
     lastSign = null,
@@ -311,8 +442,11 @@ export function createRecognizer({
         recentVecs.push(v);
         if (recentVecs.length > 8) recentVecs.shift();
         if (enroll) handleEnroll(v, vel);
-        else handleRecognize(v, vel, now);
-      } else heldCount = 0;
+        else if (!trackMotion(vel, now)) handleRecognize(v, vel, now);
+      } else {
+        motion.active = false;
+        heldCount = 0;
+      }
     }
     requestAnimationFrame(loop);
   }
@@ -371,6 +505,18 @@ export function createRecognizer({
     conductIntent(intent) {
       wsSend({ type: "sign", token: intent, mode: "conduct" });
     },
+    // manual fallback/debug trigger; normal motion signs are detected automatically.
+    async readMotionSign() {
+      const frames = [];
+      for (let i = 0; i < MOTION_MAX_FRAMES; i++) {
+        const frame = captureFrame();
+        if (frame) frames.push(frame);
+        if (i < MOTION_MAX_FRAMES - 1) {
+          await new Promise((resolve) => setTimeout(resolve, MOTION_FRAME_GAP));
+        }
+      }
+      await classifyMotion(frames);
+    },
     // force the buffered signs to commit NOW (e.g. user taps "send") instead of waiting for the pause
     commitNow() {
       commitSentence();
@@ -414,6 +560,8 @@ export function createRecognizer({
       sentBuf = [];
       lastSign = null;
       sentenceStartT = 0;
+      motion.active = false;
+      motion.frames = [];
       try {
         bridge && bridge.close();
       } catch {}
