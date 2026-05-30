@@ -1,0 +1,186 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>recognizer.js — E2E TEST</title>
+    <style>
+      body {
+        background: #0a0c10;
+        color: #e8edf2;
+        font-family: ui-monospace, monospace;
+        margin: 0;
+        padding: 14px;
+      }
+      h3 {
+        color: #3df5c5;
+        margin: 0 0 10px;
+      }
+      video {
+        display: none;
+      }
+      canvas {
+        border: 1px solid #1e2430;
+        border-radius: 8px;
+        transform: scaleX(-1);
+        max-width: 560px;
+        background: #06080b;
+      }
+      #log {
+        height: 240px;
+        overflow: auto;
+        background: #12151c;
+        border: 1px solid #1e2430;
+        border-radius: 8px;
+        padding: 8px;
+        font-size: 13px;
+        white-space: pre-wrap;
+        margin-top: 10px;
+      }
+      button,
+      input {
+        font-family: inherit;
+        background: #0e1f1b;
+        border: 1px solid #3df5c5;
+        color: #3df5c5;
+        padding: 7px 11px;
+        border-radius: 6px;
+        margin: 3px 2px;
+        cursor: pointer;
+      }
+      .row {
+        margin: 8px 0;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      .hud {
+        color: #8a94a6;
+      }
+    </style>
+  </head>
+  <body>
+    <h3>
+      recognizer.js — E2E TEST RIG
+      <span class="hud"
+        >(tests the module Aarya will import — not the product UI)</span
+      >
+    </h3>
+    <canvas id="cv" width="560" height="420"></canvas>
+    <div class="row">
+      <input id="lbl" placeholder="label e.g. HELLO" />
+      <button id="teach">teach sign</button>
+      <button id="conduct">conduct: APPOINTMENT,T,H,U,R,Z,D,A,Y</button>
+    </div>
+    <div class="row hud">
+      <span id="status">bridge: ?</span> · <span id="lat">recog: – ms</span> ·
+      <span id="prof">profile: {}</span>
+    </div>
+    <div id="log"></div>
+    <video id="v" autoplay playsinline muted></video>
+    <script type="module">
+      import { createRecognizer } from "./recognizer.js";
+      const log = (...a) => {
+        const el = document.getElementById("log");
+        el.textContent += a.join(" ") + "\n";
+        el.scrollTop = el.scrollHeight;
+      };
+      const v = document.getElementById("v"),
+        cv = document.getElementById("cv"),
+        ctx = cv.getContext("2d");
+      const CONN = [
+        [0, 1],
+        [1, 2],
+        [2, 3],
+        [3, 4],
+        [0, 5],
+        [5, 6],
+        [6, 7],
+        [7, 8],
+        [5, 9],
+        [9, 10],
+        [10, 11],
+        [11, 12],
+        [9, 13],
+        [13, 14],
+        [14, 15],
+        [15, 16],
+        [13, 17],
+        [17, 18],
+        [18, 19],
+        [19, 20],
+        [0, 17],
+      ];
+      const setProf = () =>
+        (document.getElementById("prof").textContent =
+          "profile: " + JSON.stringify(rec.getProfile()));
+      const rec = createRecognizer({
+        video: v,
+        on: {
+          ready: () => log("✅ recognizer ready — show your hand"),
+          frame: (lm) => {
+            ctx.clearRect(0, 0, cv.width, cv.height);
+            ctx.drawImage(v, 0, 0, cv.width, cv.height);
+            if (lm) {
+              ctx.strokeStyle = "#3df5c5";
+              ctx.lineWidth = 3;
+              for (const [a, b] of CONN) {
+                ctx.beginPath();
+                ctx.moveTo(lm[a].x * cv.width, lm[a].y * cv.height);
+                ctx.lineTo(lm[b].x * cv.width, lm[b].y * cv.height);
+                ctx.stroke();
+              }
+              ctx.fillStyle = "#fff";
+              for (const p of lm) {
+                ctx.beginPath();
+                ctx.arc(p.x * cv.width, p.y * cv.height, 3, 0, 7);
+                ctx.fill();
+              }
+            }
+          },
+          reading: (t, c) => {
+            document.title = t ? `${t} ${c.toFixed(2)}` : "…";
+          },
+          sign: (t, c, ms) => {
+            log(
+              `🖐  SIGN: ${t}  (conf ${c.toFixed(2)}, ${ms}ms) → spoken via bridge`,
+            );
+            document.getElementById("lat").textContent = `recog: ${ms} ms`;
+            setProf();
+          },
+          ambiguous: (top3) =>
+            log(
+              `❓ ambiguous → ${top3.join(", ")}  (UI would show these; rec.confirm(label))`,
+            ),
+          learned: (l, n) => {
+            log(`📚 LEARNED: ${l}  (vocabulary now ${n})`);
+            setProf();
+          },
+          spoken: (t) => log(`🗣  AGENT SPOKE: "${t}"`),
+          caption: (t) => log(`💬 HEARING: "${t}"`),
+          bridge: (up) => {
+            document.getElementById("status").textContent =
+              "bridge: " + (up ? "connected ●" : "offline ○");
+            log(
+              "bridge " +
+                (up ? "connected ✅" : "offline (run bridge_server.py)"),
+            );
+          },
+          error: (e) => log("⚠ " + e),
+        },
+      });
+      document.getElementById("teach").onclick = () => {
+        const l = document.getElementById("lbl").value.trim();
+        if (l) {
+          rec.teachSign(l);
+          log(`teaching "${l.toUpperCase()}" — hold the sign steady for ~1s…`);
+        }
+      };
+      document.getElementById("conduct").onclick = () => {
+        log("conduct → sending raw signs to Nemotron…");
+        rec.conductIntent("APPOINTMENT, T,H,U,R,Z,D,A,Y");
+      };
+      rec.start().catch((e) => log("start failed: " + e.message));
+    </script>
+  </body>
+</html>
