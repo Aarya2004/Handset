@@ -1532,6 +1532,10 @@
               setMotionBusy(false);
               $("reading").innerHTML = `<span style="color:var(--clay)">motion reader unavailable</span>`;
               console.warn("[VLM motion] request failed:", data);
+            } else if (state === "aborted") {
+              // capture ended too short / hand left frame mid-gesture — clear the UI
+              setMotionBusy(false);
+              $("reading").textContent = "Show your hand to begin…";
             }
           },
           spoken(text) {

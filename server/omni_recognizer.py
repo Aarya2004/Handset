@@ -41,7 +41,7 @@ load_dotenv(os.path.join(os.path.dirname(__file__), ".env"), override=False)
 BACKEND = os.getenv("VLM_BACKEND", "omni").strip().lower()
 
 REGION = os.getenv("AWS_REGION", "us-west-2")
-MAX_IMAGES = int(os.getenv("NEMOTRON_VL_MAX_IMAGES", "4"))
+MAX_IMAGES = int(os.getenv("NEMOTRON_VL_MAX_IMAGES", "6"))  # more frames across the movement = better motion signal for the VLM
 
 # Omni (OpenRouter) config — the new default.
 # Nemotron 3 Nano Omni — the model we showcase (the multimodal "Omni" sponsor

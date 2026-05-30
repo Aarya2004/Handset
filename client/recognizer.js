@@ -41,7 +41,7 @@ const MOTION_VEL = 0.04; // above this avg landmark velocity => dynamic sign can
 const MOTION_MIN_MS = 240;
 const MOTION_SETTLE_MS = 260;
 const MOTION_FRAME_GAP = 180;
-const MOTION_MAX_FRAMES = 4;
+const MOTION_MAX_FRAMES = 6; // more frames across the movement = better temporal signal for the VLM (server MAX_IMAGES bumped to match)
 const MOTION_COOLDOWN = 2800;
 const MOTION_TIMEOUT_MS = 8000; // VLM round-trip is ~2-3s (non-reasoning VL); 2.2s aborted every real call -> "motion reader unavailable"
 const MOTION_MIN_CONF = 0.55;
@@ -319,6 +319,32 @@ export function createRecognizer({
       motion.cooldownUntil = performance.now() + MOTION_COOLDOWN;
     }
   }
+  // End the current motion capture and send to the VLM if we have a real burst.
+  // Called both when the hand settles AND when it leaves the frame (off-screen is
+  // a legit "sign ended" signal — without this the capture got silently dropped
+  // and the UI stuck on "reading motion…").
+  function finishMotion(now, { checkStatic = false } = {}) {
+    if (!motion.active) return;
+    const frames = motion.frames.slice();
+    const duration = now - motion.startedAt;
+    motion.active = false;
+    motion.frames = [];
+    motion.suppressUntil = now + 180;
+    if (checkStatic) {
+      const probe = avgRecent(3);
+      const staticRead = probe ? classify(probe) : { token: null, conf: 0 };
+      if (staticRead.token && staticRead.conf >= ACCEPT && !dynamicVocab.includes(staticRead.token)) {
+        motion.suppressUntil = 0;
+        return false; // it was actually a settled static sign — let k-NN handle it
+      }
+    }
+    if (duration >= MOTION_MIN_MS && frames.length >= 2) {
+      void classifyMotion(frames);
+    } else {
+      emit("motion", "aborted", {}); // too short / too few frames — clear the "reading…" UI
+    }
+    return true;
+  }
   function trackMotion(vel, now) {
     if (
       !dynamicRecognition ||
@@ -347,24 +373,8 @@ export function createRecognizer({
     if (motion.active) {
       addMotionFrame(now);
       if (now - motion.lastMoveAt >= MOTION_SETTLE_MS) {
-        const frames = motion.frames.slice();
-        const duration = now - motion.startedAt;
-        motion.active = false;
-        motion.frames = [];
-        motion.suppressUntil = now + 180;
-        const probe = avgRecent(3);
-        const staticRead = probe ? classify(probe) : { token: null, conf: 0 };
-        if (
-          staticRead.token &&
-          staticRead.conf >= ACCEPT &&
-          !dynamicVocab.includes(staticRead.token)
-        ) {
-          motion.suppressUntil = 0;
-          return false;
-        }
-        if (duration >= MOTION_MIN_MS && frames.length >= 2) {
-          void classifyMotion(frames);
-        }
+        const handled = finishMotion(now, { checkStatic: true });
+        if (handled === false) return false; // settled into a static sign -> k-NN
       }
       return true;
     }
@@ -481,9 +491,12 @@ export function createRecognizer({
         if (enroll) handleEnroll(v, vel);
         else if (!trackMotion(vel, now)) handleRecognize(v, vel, now, shapeStable);
       } else {
-        motion.active = false;
+        // hand left the frame — if a motion capture was in progress, SEND it
+        // (off-screen = sign ended). Don't silently drop it (that left the UI
+        // stuck on "reading motion…").
+        if (motion.active) finishMotion(now);
         heldCount = 0;
-        prevSpread = null; // hand left frame — reset so re-entry isn't a false "stable"
+        prevSpread = null; // reset so re-entry isn't a false "stable"
       }
     }
     requestAnimationFrame(loop);
