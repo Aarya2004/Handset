@@ -26,15 +26,31 @@ import re
 import time
 from typing import Any
 
-import boto3
-from botocore.config import Config
 from dotenv import load_dotenv
 
 load_dotenv(override=True)
+# also pick up server/.env when run from elsewhere (the OpenRouter key lives there)
+load_dotenv(os.path.join(os.path.dirname(__file__), ".env"), override=False)
+
+# ── backend selection ────────────────────────────────────────────────────────
+# VLM_BACKEND=omni (default) -> NVIDIA Nemotron 3 Nano Omni via OpenRouter
+#   (OpenAI-compatible, multimodal, no GPU/AWS/quota). VLM_BACKEND=bedrock keeps
+#   the original Bedrock-Nemotron path. The recognize(frames, vocab) interface,
+#   the motion-hint prompt, and the SIGN:/CONFIDENCE: contract are identical for
+#   both — so recognizer.js's motion path is unaffected by the swap.
+BACKEND = os.getenv("VLM_BACKEND", "omni").strip().lower()
 
 REGION = os.getenv("AWS_REGION", "us-west-2")
-MODEL_ID = os.getenv("NEMOTRON_VL_MODEL", "nvidia.nemotron-nano-12b-v2")
 MAX_IMAGES = int(os.getenv("NEMOTRON_VL_MAX_IMAGES", "4"))
+
+# Omni (OpenRouter) config — the new default
+OMNI_MODEL = os.getenv("OMNI_VL_MODEL", "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free")
+OMNI_BASE_URL = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
+# Bedrock config (legacy backend)
+BEDROCK_MODEL_ID = os.getenv("NEMOTRON_VL_MODEL", "nvidia.nemotron-nano-12b-v2")
+
+# the model id surfaced in responses / the UI badge
+MODEL_ID = OMNI_MODEL if BACKEND == "omni" else BEDROCK_MODEL_ID
 
 # The demo sign vocabulary the VLM chooses from. Multiple-choice prompting is
 # what makes the VLM actually work: open-ended "identify the sign" returns
@@ -80,13 +96,32 @@ def _sign_prompt(vocab: list[str]) -> str:
     )
 
 
-def _client():
-    # Credentials are picked up from env (AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY / AWS_REGION).
+def _bedrock_client():
+    # Credentials picked up from env (AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY / AWS_REGION).
+    import boto3
+    from botocore.config import Config
+
     return boto3.client(
         "bedrock-runtime",
         region_name=REGION,
         config=Config(retries={"max_attempts": 2, "mode": "standard"}, read_timeout=30),
     )
+
+
+_omni = None
+
+
+def _omni_client():
+    """OpenAI SDK pointed at OpenRouter — Nemotron 3 Nano Omni is OpenAI-compatible."""
+    global _omni
+    if _omni is None:
+        from openai import OpenAI
+
+        api_key = os.environ.get("OPENROUTER_API_KEY")
+        if not api_key:
+            raise RuntimeError("OPENROUTER_API_KEY not set (expected in server/.env)")
+        _omni = OpenAI(api_key=api_key, base_url=OMNI_BASE_URL)
+    return _omni
 
 
 def _strip_data_url(s: str) -> bytes:
@@ -156,26 +191,52 @@ def _parse_confidence(raw: str, sign: str) -> float:
         return 0.0 if sign == "UNKNOWN" else 0.65
 
 
+def _invoke_omni(body: dict) -> str:
+    """Send the OpenAI-style body to Nemotron Omni via OpenRouter; return raw text.
+
+    This is a *reasoning* model, so give it token headroom — it may think before
+    emitting the SIGN:/CONFIDENCE: lines, which _parse_sign/_parse_confidence
+    extract regardless of any preamble.
+    """
+    resp = _omni_client().chat.completions.create(
+        model=OMNI_MODEL,
+        messages=body["messages"],
+        max_tokens=int(os.getenv("OMNI_MAX_TOKENS", "512")),
+        temperature=body.get("temperature", 0.0),
+        extra_headers={"HTTP-Referer": "https://localhost", "X-Title": "handset-asl"},
+    )
+    return resp.choices[0].message.content or ""
+
+
+def _invoke_bedrock(body: dict) -> str:
+    """Send the body to Nemotron VL on Bedrock; return raw text."""
+    resp = _bedrock_client().invoke_model(
+        modelId=BEDROCK_MODEL_ID,
+        body=json.dumps(body),
+        contentType="application/json",
+        accept="application/json",
+    )
+    return _extract_text(json.loads(resp["body"].read()))
+
+
 def recognize(frames: list[str], vocab: list[str] | None = None) -> dict:
-    """Send sampled signing frames to Nemotron VL on Bedrock; return the sign guess."""
+    """Send sampled signing frames to the configured VLM backend; return the sign guess.
+
+    Backend is VLM_BACKEND (omni|bedrock); default omni (Nemotron 3 Nano Omni via
+    OpenRouter). Same prompt + SIGN:/CONFIDENCE: contract for both.
+    """
     vocab = vocab or DEFAULT_VOCAB
     if not frames:
         return {"model": MODEL_ID, "sign": "UNKNOWN", "raw": "", "latency_ms": 0, "error": "no frames"}
     body = _build_body(frames, vocab)
     t0 = time.time()
     try:
-        resp = _client().invoke_model(
-            modelId=MODEL_ID,
-            body=json.dumps(body),
-            contentType="application/json",
-            accept="application/json",
-        )
-        payload = json.loads(resp["body"].read())
-        raw = _extract_text(payload).strip()
+        raw = (_invoke_omni(body) if BACKEND == "omni" else _invoke_bedrock(body)).strip()
         sign = _parse_sign(raw, vocab)
         confidence = _parse_confidence(raw, sign)
         return {
             "model": MODEL_ID,
+            "backend": BACKEND,
             "sign": sign,
             "confidence": confidence,
             "raw": raw,
@@ -184,6 +245,7 @@ def recognize(frames: list[str], vocab: list[str] | None = None) -> dict:
     except Exception as e:
         return {
             "model": MODEL_ID,
+            "backend": BACKEND,
             "sign": "UNKNOWN",
             "raw": "",
             "latency_ms": int((time.time() - t0) * 1000),
