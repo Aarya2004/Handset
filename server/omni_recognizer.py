@@ -201,11 +201,22 @@ def _invoke_omni(body: dict) -> str:
     resp = _omni_client().chat.completions.create(
         model=OMNI_MODEL,
         messages=body["messages"],
-        max_tokens=int(os.getenv("OMNI_MAX_TOKENS", "512")),
+        # This reasoning model spends ~350-450 tokens THINKING before it emits the
+        # SIGN:/CONFIDENCE: lines, and reasoning_tokens count against max_tokens —
+        # too low a cap = it gets cut off mid-thought and returns EMPTY content
+        # (the "motion unclear" bug). Give it real headroom.
+        max_tokens=int(os.getenv("OMNI_MAX_TOKENS", "900")),
         temperature=body.get("temperature", 0.0),
         extra_headers={"HTTP-Referer": "https://localhost", "X-Title": "handset-asl"},
     )
-    return resp.choices[0].message.content or ""
+    msg = resp.choices[0].message
+    text = msg.content or ""
+    # Some reasoning models put the chain-of-thought in a separate `reasoning`
+    # field and may leave content empty even after finishing — fall back to it so
+    # we can still scrape the SIGN: line the model emitted while thinking.
+    if not text.strip():
+        text = getattr(msg, "reasoning", "") or ""
+    return text
 
 
 def _invoke_bedrock(body: dict) -> str:
