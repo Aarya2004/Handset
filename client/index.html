@@ -1442,10 +1442,16 @@
       }
 
       // ---------- bridge to the bot (real WebSocket, H1) ----------
+      // ?bridge=wss://<tunnel>/signal lets a remote signer (Arav) point at the
+      // host running handset_bot.py without editing this file. Defaults to the
+      // Handset bot on 8790 (8787 is the old bridge_server / Quorus port).
+      const BRIDGE_URL =
+        new URLSearchParams(location.search).get("bridge") ||
+        "ws://localhost:8790/signal";
       let bridge = null;
       function connectBridge() {
         try {
-          bridge = new WebSocket("ws://localhost:8787/signal");
+          bridge = new WebSocket(BRIDGE_URL);
           bridge.onopen = () => {
             $("spark").classList.add("ok");
             $("sparkTxt").textContent = "connected · sign to speech is live";
