@@ -42,7 +42,7 @@ const MOTION_SETTLE_MS = 260;
 const MOTION_FRAME_GAP = 180;
 const MOTION_MAX_FRAMES = 4;
 const MOTION_COOLDOWN = 2800;
-const MOTION_TIMEOUT_MS = 2200;
+const MOTION_TIMEOUT_MS = 8000; // VLM round-trip is ~2-3s (non-reasoning VL); 2.2s aborted every real call -> "motion reader unavailable"
 const MOTION_MIN_CONF = 0.55;
 
 const WASM =
