@@ -1514,16 +1514,36 @@
               const conf = Number(data.confidence || 0);
               $("reading").innerHTML = `<span class="tok">${sign}</span><span class="conf">${Math.round(conf * 100)}%</span>`;
               if (data.latencyMs) $("recms").innerHTML = data.latencyMs + "<small> ms</small>";
+              // Log the raw VLM response so you can verify in DevTools it's real Omni
+              console.log(
+                `%c[VLM motion] ${data.model || "?"}%c → ${sign} (conf ${conf.toFixed(2)}, ${data.latencyMs || "?"}ms)`,
+                "color:#76b900;font-weight:600", "color:inherit",
+                { sign, confidence: conf, model: data.model, backend: data.backend, raw: data.raw },
+              );
             } else if (state === "unclear") {
               setMotionBusy(false);
               $("reading").innerHTML = `<span style="color:var(--clay)">motion unclear — try once more</span>`;
+              console.log(
+                `%c[VLM motion] ${data.model || "?"}%c → UNKNOWN/low-conf (${data.latencyMs || "?"}ms)`,
+                "color:#c08a5e;font-weight:600", "color:inherit",
+                { sign: data.sign, confidence: data.confidence, model: data.model, raw: data.raw },
+              );
             } else if (state === "error") {
               setMotionBusy(false);
               $("reading").innerHTML = `<span style="color:var(--clay)">motion reader unavailable</span>`;
+              console.warn("[VLM motion] request failed:", data);
             }
           },
-          spoken(text) { pushCaption("you", text); },     // agent's spoken sentence -> YOU
-          caption(text) { pushCaption("them", text); },   // hearing party reply -> THEM
+          spoken(text) {
+            // Nemotron's conduct output (the sentence spoken on the call)
+            console.log("%c[Nemotron conduct] spoke:%c " + text, "color:#76b900;font-weight:600", "color:inherit");
+            pushCaption("you", text);
+          },
+          caption(text) {
+            // hearing party's reply, via Nemotron ASR + lexicon boost
+            console.log("%c[Nemotron ASR] caption:%c " + text, "color:#8ab4f8;font-weight:600", "color:inherit");
+            pushCaption("them", text);
+          },
           ambiguous(top3) { showGate(top3); },
           learned(label, count) {
             renderChips(); flashChip(label);

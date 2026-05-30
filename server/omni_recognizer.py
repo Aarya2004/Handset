@@ -290,7 +290,17 @@ def _serve():
 
     @app.post("/recognize-omni")
     def recognize_omni(req: Req):
-        return recognize(req.frames, req.vocab)
+        result = recognize(req.frames, req.vocab)
+        # visible proof every motion request actually hits the VLM
+        print(
+            f"[recognize-omni] {len(req.frames)} frames -> "
+            f"{result.get('sign')} (conf {result.get('confidence')}) "
+            f"via {result.get('backend')}:{result.get('model')} "
+            f"{result.get('latency_ms')}ms"
+            + (f"  ERROR={result['error']}" if result.get("error") else ""),
+            flush=True,
+        )
+        return result
 
     print(f"OMNI eval server on http://localhost:8788  model={MODEL_ID} region={REGION}")
     uvicorn.run(app, host="0.0.0.0", port=8788, log_level="warning")
