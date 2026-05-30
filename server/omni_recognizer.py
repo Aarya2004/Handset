@@ -43,8 +43,11 @@ BACKEND = os.getenv("VLM_BACKEND", "omni").strip().lower()
 REGION = os.getenv("AWS_REGION", "us-west-2")
 MAX_IMAGES = int(os.getenv("NEMOTRON_VL_MAX_IMAGES", "4"))
 
-# Omni (OpenRouter) config — the new default
-OMNI_MODEL = os.getenv("OMNI_VL_MODEL", "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free")
+# Omni (OpenRouter) config — the new default.
+# Use the NON-reasoning VL model: it answers directly (~2-3s, clean SIGN: line)
+# instead of burning the token budget on chain-of-thought like the :reasoning
+# variant (which took ~6s and often returned empty). Override via OMNI_VL_MODEL.
+OMNI_MODEL = os.getenv("OMNI_VL_MODEL", "nvidia/nemotron-nano-12b-v2-vl:free")
 OMNI_BASE_URL = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
 # Bedrock config (legacy backend)
 BEDROCK_MODEL_ID = os.getenv("NEMOTRON_VL_MODEL", "nvidia.nemotron-nano-12b-v2")
