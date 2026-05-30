@@ -16,7 +16,15 @@
         margin: 0 0 10px;
       }
       video {
-        display: none;
+        /* must NOT be display:none — a hidden video won't advance currentTime,
+           so MediaPipe gets no frames. Keep it rendered but invisible. */
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 1px;
+        height: 1px;
+        opacity: 0.01;
+        pointer-events: none;
       }
       canvas {
         border: 1px solid #1e2430;
