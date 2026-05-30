@@ -33,7 +33,7 @@ const ACCEPT = 0.7,
   ASK = 0.45; // confidence gates (loosened so natural signing variation commits fast, not after 4s)
 const TAU = 1.2; // distance scale for confidence (raised from 0.55: typical sign distances now map to high confidence)
 const COOLDOWN = 700; // ms between same-token emissions (lowered for a more live/continuous feel)
-const PAUSE_MS = 5000; // long auto-commit fallback — the FAST path is Send/Space (instant, batches all signs into one sentence)
+const PAUSE_MS = 3000; // keep signing within 3s -> words accumulate; pause >3s -> the whole buffer becomes ONE sentence (Space = commit instantly)
 const MAX_WORDS = 8; // hard cap — commit even without a pause (prevents never-commit on fluent signing)
 const MAX_SENTENCE_MS = 6000; // hard cap — commit after this long even if signs keep coming
 const CAP_FRAMES = 5; // frames captured per enrollment

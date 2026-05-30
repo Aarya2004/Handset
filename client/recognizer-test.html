@@ -190,7 +190,7 @@
       const rec = createRecognizer({
         video: v,
         bridgeUrl,
-        dynamicRecognition: false, // no VLM server (8788) on this machine — pure static k-NN, no interception
+        dynamicRecognition: true, // VLM motion tier ON (Omni server running on 8788) — dynamic/two-hand signs
         on: {
           ready: () => log("✅ recognizer ready — show your hand"),
           frame: (lm) => {
