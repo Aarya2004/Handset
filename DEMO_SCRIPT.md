@@ -89,9 +89,9 @@ A 90s screen+phone recording of the full Beat 1→4 run sits one keypress away (
 
   `[CEKURA RESULTS: baseline __% → GEPA __% booking, certified on Cekura dashboard]`
 
-- **Side eval, zero live-demo risk.** Separately, we ran the _same_ signing clips through NVIDIA Nemotron-Nano-12B-VL on AWS Bedrock (`omni_recognizer.py`) head-to-head against the on-device MediaPipe recognizer and scored both in Cekura. MediaPipe stays the live spine (VL-on-ASL is unproven); the VL path is the "open NVIDIA multimodal model on AWS, measured" comparison — off the critical path, behind a config flag.
+- **Dynamic-sign tier.** Movement signs (THANK-YOU etc.) that static k-NN can't read go through **NVIDIA Nemotron 3 Nano Omni** (multimodal, via OpenRouter — `omni_recognizer.py`): recognizer.js detects a motion burst, sends the frames, Omni names the sign, and it feeds back into the same conduct path. On-device MediaPipe k-NN stays the fast spine for static signs; Omni handles movement — the "open NVIDIA multimodal model, measured" story, now on the live path.
 
-**Sponsor surface (all real, all in the live or eval path):** NVIDIA Nemotron (conduct LLM + ASR + GEPA reflection LM) and Nemotron-Nano-12B-VL on AWS Bedrock; Cekura (simulation + scoring + certified self-improvement loop); Daily/Pipecat (bot orchestration); Twilio (the real outbound call); AWS (Bedrock + the Nemotron fleet).
+**Sponsor surface (all real, all in the live or eval path):** NVIDIA Nemotron (conduct LLM + ASR + GEPA reflection LM + **Nano Omni multimodal for dynamic signs**); Cekura (simulation + scoring + certified self-improvement loop); Daily/Pipecat (bot orchestration); Twilio (the real outbound call).
 
 ---
 
