@@ -266,7 +266,14 @@ export function createRecognizer({
           video: { width: 960, height: 720 },
         });
         video.srcObject = stream;
+        video.muted = true; // required for autoplay
         await new Promise((r) => (video.onloadeddata = r));
+        // IMPORTANT: the <video> must NOT be display:none (a hidden video won't
+        // advance currentTime, so no frames reach MediaPipe). Use width:1px/opacity:0
+        // if you need it invisible. Force playback explicitly to be safe:
+        try {
+          await video.play();
+        } catch (e) {}
         running = true;
         connectBridge();
         emit("ready");
