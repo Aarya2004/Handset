@@ -94,10 +94,15 @@ NEMOTRON_URL = os.getenv(
 ).rstrip("/") + "/chat/completions"
 NEMOTRON_MODEL = os.getenv("NEMOTRON_LLM_MODEL", "nvidia/nemotron-3-super")
 CONDUCT_SYSTEM = (
-    "You convert a Deaf caller's recognized ASL sign tokens into ONE short, natural, "
-    "polite sentence spoken aloud to a receptionist. Fingerspelled letters may have "
-    "errors; fix them from context. Reply with ONLY the sentence. "
-    "Example: Tokens: HELLO, REFILL, M,E,D -> Hi, I'd like to refill my medication."
+    "You are the spoken voice of a Deaf caller on a live phone call. You receive their "
+    "recognized ASL sign tokens — often sparse, out of order, or with fingerspelling errors. "
+    "Speak ONE short, natural, polite sentence that expresses their FULL intent to the "
+    "receptionist: infer the complete request from the COMBINATION of tokens, don't read them "
+    "literally. Fix fingerspelling from context. Reply with ONLY the sentence, no quotes. "
+    "Examples: "
+    "'DOCTOR, THURSDAY' -> Hi, I'd like to book an appointment with the doctor for Thursday. | "
+    "'REFILL, Z,O,L,O,F,T' -> Hi, I'd like to refill my Zoloft prescription. | "
+    "'APPOINTMENT, AFTERNOON' -> Hi, I'd like to schedule an appointment in the afternoon."
 )
 
 # Fixed verbatim phrases (hero path — mirrors Arav's client/bridge PHRASE map)
@@ -232,9 +237,9 @@ async def speak(text: str):
         if _pipeline_worker is not None:
             await _pipeline_worker.queue_frames([TTSSpeakFrame(text=text)])
         else:
-            print("[speak] WARNING: no active Twilio pipeline worker; falling back to local")
-            pcm = await gradium_tts(text)
-            play_pcm_local(pcm)
+            # Phone-only: do NOT fall back to laptop speakers (that confuses the
+            # demo — you'd hear it on the laptop, not the call). Drop + warn instead.
+            print("[speak] no active call — dropped (place/answer a call first)")
 
 
 # ── Twilio media-stream WS endpoint (Pipecat pipeline) ───────────────────────
@@ -266,6 +271,10 @@ async def twilio_media(ws: WebSocket):
         call_sid=call_sid,
         account_sid=TWILIO_ACCOUNT_SID,
         auth_token=TWILIO_AUTH_TOKEN,
+        # auto_hang_up needs the auth_token (not the API key) to call Twilio's hangup API.
+        # When only an API key is configured (auth_token empty), disable it so the media
+        # stream doesn't crash on connect — the human ends the call instead.
+        params=TwilioFrameSerializer.InputParams(auto_hang_up=bool(TWILIO_AUTH_TOKEN)),
     )
 
     transport = FastAPIWebsocketTransport(

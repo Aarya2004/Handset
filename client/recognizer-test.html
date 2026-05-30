@@ -80,6 +80,7 @@
       <button id="teach">teach sign</button>
       <button id="conduct">conduct: APPOINTMENT,T,H,U,R,Z,D,A,Y</button>
       <button id="export">⬇ export library → default_profile.json</button>
+      <button id="send">▶ Send (speak buffered signs now)</button>
     </div>
     <div class="row hud">
       <span id="status">bridge: ?</span> · <span id="lat">recog: – ms</span> ·
@@ -128,6 +129,20 @@
       >
         —
       </div>
+      <div style="font-size: 13px; color: #8a94a6; margin-top: 8px">
+        💬 their reply (your voice → Nemotron ASR + boost)
+      </div>
+      <div
+        id="caption"
+        style="
+          font-size: 22px;
+          font-weight: 600;
+          color: #6cb6ff;
+          min-height: 28px;
+        "
+      >
+        —
+      </div>
     </div>
     <div id="log"></div>
     <video id="v" autoplay playsinline muted></video>
@@ -167,8 +182,15 @@
       const setProf = () =>
         (document.getElementById("prof").textContent =
           "profile: " + JSON.stringify(rec.getProfile()));
+      // ?bridge=wss://<tunnel>/signal points the test rig at a remote bot (Aarya's tunnel);
+      // default stays the local say-bridge (8787) for isolated testing.
+      const bridgeUrl =
+        new URLSearchParams(location.search).get("bridge") ||
+        "ws://localhost:8787/signal";
       const rec = createRecognizer({
         video: v,
+        bridgeUrl,
+        dynamicRecognition: false, // no VLM server (8788) on this machine — pure static k-NN, no interception
         on: {
           ready: () => log("✅ recognizer ready — show your hand"),
           frame: (lm) => {
@@ -201,6 +223,7 @@
           sentence: (intent) => {
             document.getElementById("say").textContent =
               "forming: " + intent + " …";
+            document.getElementById("buf").textContent = "—"; // clear buffer on commit
           },
           sign: (t, c, ms) => {
             log(
@@ -221,7 +244,10 @@
             log(`🗣  AGENT SPOKE: "${t}"`);
             document.getElementById("say").textContent = t;
           },
-          caption: (t) => log(`💬 HEARING: "${t}"`),
+          caption: (t) => {
+            log(`💬 HEARING: "${t}"`);
+            document.getElementById("caption").textContent = t;
+          },
           bridge: (up) => {
             document.getElementById("status").textContent =
               "bridge: " + (up ? "connected ●" : "offline ○");
@@ -256,6 +282,22 @@
           `⬇ exported ${Object.keys(rec.getProfile()).length} signs → default_profile.json (drop it in client/ to ship as the base library)`,
         );
       };
+      document.getElementById("send").onclick = () => {
+        const buf = rec.getBuffer();
+        if (!buf.length) {
+          log("(nothing buffered to send)");
+          return;
+        }
+        log(`▶ sending buffered: ${buf.join(", ")}`);
+        rec.commitNow();
+      };
+      // SPACEBAR = Send — sign your words, tap space, it speaks the logical sentence instantly
+      document.addEventListener("keydown", (e) => {
+        if (e.code === "Space" && document.activeElement.tagName !== "INPUT") {
+          e.preventDefault();
+          document.getElementById("send").click();
+        }
+      });
       window.rec = rec; // console: rec.exportProfile(), rec.importProfile(obj)
       rec.start().catch((e) => log("start failed: " + e.message));
     </script>

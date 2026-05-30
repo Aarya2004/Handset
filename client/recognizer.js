@@ -32,7 +32,7 @@ const ACCEPT = 0.7,
   ASK = 0.45; // confidence gates (loosened so natural signing variation commits fast, not after 4s)
 const TAU = 1.2; // distance scale for confidence (raised from 0.55: typical sign distances now map to high confidence)
 const COOLDOWN = 700; // ms between same-token emissions (lowered for a more live/continuous feel)
-const PAUSE_MS = 1500; // ms with no new sign before buffered signs become ONE spoken sentence
+const PAUSE_MS = 5000; // long auto-commit fallback — the FAST path is Send/Space (instant, batches all signs into one sentence)
 const MAX_WORDS = 8; // hard cap — commit even without a pause (prevents never-commit on fluent signing)
 const MAX_SENTENCE_MS = 6000; // hard cap — commit after this long even if signs keep coming
 const CAP_FRAMES = 5; // frames captured per enrollment
@@ -279,7 +279,11 @@ export function createRecognizer({
       const token = String(result.sign || "UNKNOWN").toUpperCase();
       const conf = Number(result.confidence ?? 0);
       const latency = Math.round(performance.now() - t0);
-      if (!dynamicVocab.includes(token) || token === "UNKNOWN" || conf < MOTION_MIN_CONF) {
+      if (
+        !dynamicVocab.includes(token) ||
+        token === "UNKNOWN" ||
+        conf < MOTION_MIN_CONF
+      ) {
         emit("motion", "unclear", { ...result, latencyMs: latency });
         return;
       }
@@ -295,7 +299,12 @@ export function createRecognizer({
     }
   }
   function trackMotion(vel, now) {
-    if (!dynamicRecognition || enroll || now < motion.cooldownUntil || motion.busy) {
+    if (
+      !dynamicRecognition ||
+      enroll ||
+      now < motion.cooldownUntil ||
+      motion.busy
+    ) {
       return now < motion.suppressUntil;
     }
     const moving = vel > MOTION_VEL;
