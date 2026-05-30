@@ -53,14 +53,18 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from twilio.rest import Client as TwilioClient
 
-from pipecat.frames.frames import TTSSpeakFrame
+from pipecat.frames.frames import TranscriptionFrame, TTSSpeakFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.runner.utils import parse_telephony_websocket
 from pipecat.serializers.twilio import TwilioFrameSerializer
 from pipecat.services.gradium.tts import GradiumTTSService
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams, FastAPIWebsocketTransport
 from pipecat.workers.runner import WorkerRunner
+
+from lexicon import boost
+from nvidia_stt import NVidiaWebSocketSTTService
 
 load_dotenv(override=True)
 
@@ -110,6 +114,12 @@ PHRASE = {
 app = FastAPI()
 clients: set[WebSocket] = set()
 
+# ── Personal lexicon for ASR word-boost (grows per session; feeds caption-back) ─
+# Seeded with the demo vocabulary; the same per-user lexicon the sign-profile builds.
+USER_LEXICON: list[str] = [
+    "Zoloft", "Thursday", "Wednesday", "appointment", "refill", "Chen", "metoprolol",
+]
+
 # ── Pipecat pipeline state ────────────────────────────────────────────────────
 # Module-level reference to the running PipelineWorker so /signal can inject
 # TTSSpeakFrames.  None until /twilio-media receives its first connection.
@@ -125,6 +135,28 @@ async def broadcast(obj: dict):
             dead.append(c)
     for d in dead:
         clients.discard(d)
+
+
+class CaptionEmitter(FrameProcessor):
+    """Catches the hearing party's finalized transcripts (Nemotron ASR), applies
+    the user's personal-lexicon word-boost, and broadcasts a {type:"caption"}
+    to the client so the Deaf user reads the reply. The caption-back loop.
+
+    Passes all frames through untouched — it only observes TranscriptionFrames.
+    """
+
+    async def process_frame(self, frame, direction: FrameDirection):
+        await super().process_frame(frame, direction)
+        if isinstance(frame, TranscriptionFrame):
+            text = (frame.text or "").strip()
+            # Only emit finalized utterances (skip noisy interims). Some STT
+            # servers don't set finalized — fall back to emitting non-empty text.
+            is_final = getattr(frame, "finalized", False)
+            if text and (is_final or frame.result is None):
+                corrected = boost(text, USER_LEXICON)
+                print(f"[caption] aarya: {corrected!r}  (raw: {text!r})")
+                await broadcast({"type": "caption", "speaker": "aarya", "text": corrected})
+        await self.push_frame(frame, direction)
 
 
 # ── conduct: Nemotron turns noisy sign tokens into a real sentence ────────────
@@ -251,11 +283,20 @@ async def twilio_media(ws: WebSocket):
         ),
     )
 
-    # TTS-only pipeline: transport input -> Gradium TTS -> transport output.
-    # No LLM in this pipeline — no double-speak risk.  Inbound 8kHz mu-law
-    # audio from the hearing caller passes through the input processor unused.
+    # Nemotron ASR on the hearing party's inbound audio -> caption-back to client.
+    stt = NVidiaWebSocketSTTService(
+        url=os.getenv("NVIDIA_ASR_URL", "ws://localhost:8080"),
+        sample_rate=16000,  # Parakeet requires 16k; Pipecat resamples from Twilio's 8k
+    )
+    caption_emitter = CaptionEmitter()
+
+    # Pipeline: inbound phone audio -> STT -> caption-back; and TTSSpeakFrame
+    # injections -> Gradium TTS -> outbound phone audio. No LLM here (no
+    # double-speak): conduct happens before we queue the TTSSpeakFrame.
     pipeline = Pipeline([
         transport.input(),
+        stt,
+        caption_emitter,
         tts,
         transport.output(),
     ])
