@@ -95,6 +95,12 @@
   @keyframes pop{0%{transform:scale(.8);opacity:0}50%{transform:scale(1.08)}100%{transform:scale(1);opacity:1}}
   .teach{font:600 13px var(--font); color:#06231b; background:var(--signal); border:none; cursor:pointer; padding:9px 16px; border-radius:999px}
   .teach:hover{filter:brightness(1.08)}
+  .teach.teach-alt{background:transparent; color:var(--dim); border:1px solid rgba(255,255,255,.12)}
+  .teach.teach-alt:hover{color:var(--text); filter:none}
+  .teach.recording{background:var(--hearing); color:#2a1c04; animation:rec-pulse 1s ease-in-out infinite}
+  @keyframes rec-pulse{0%,100%{filter:brightness(1)}50%{filter:brightness(1.25)}}
+  .cap-status{font-size:12px; color:var(--dim); min-height:16px; text-align:right; font-variant-numeric:tabular-nums}
+  .cap-status b{color:var(--signal)}
 
   @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 </style>
@@ -122,7 +128,9 @@
 
     <div class="profile">
       <div class="vocab" id="vocab"></div>
-      <button class="teach" id="teach">Teach a sign</button>
+      <button class="teach" id="capture">Sign with movement</button>
+      <button class="teach teach-alt" id="teach">Teach a sign</button>
+      <div class="cap-status" id="cap-status"></div>
     </div>
 
     <div class="captions" id="captions"></div>
@@ -213,6 +221,58 @@ const rec = createRecognizer({
 });
 
 $('teach').onclick = ()=>{ const label=prompt('Name the sign to teach:'); if(label) rec.teachSign(label.toUpperCase()); };
+
+/* ---- VLM movement-sign capture: record frames -> NVIDIA VLM -> speak ----
+   For dynamic signs (THANK YOU etc.) that static k-NN can't read. Captures a
+   burst from the video the UI owns, sends to /recognize-omni, and on a confident
+   result speaks it via the recognizer's WS (conductIntent). */
+const OMNI_URL = 'http://localhost:8788/recognize-omni';
+const CAP_N = 4, CAP_MS = 1500;
+let capturing = false;
+
+function grabFrame(){
+  const v=$('video');
+  const c=document.createElement('canvas');
+  c.width=Math.min(640, v.videoWidth||640); c.height=Math.round(c.width*(v.videoHeight||480)/(v.videoWidth||640));
+  const ctx=c.getContext('2d');
+  ctx.translate(c.width,0); ctx.scale(-1,1);            // mirror to match the selfie view
+  ctx.drawImage(v,0,0,c.width,c.height);
+  return c.toDataURL('image/jpeg',0.85);
+}
+
+async function captureMovementSign(){
+  if(capturing) return;
+  capturing=true;
+  const btn=$('capture'), st=$('cap-status');
+  btn.classList.add('recording'); btn.textContent='Recording…';
+  const frames=[];
+  const t0=performance.now();
+  for(let i=0;i<CAP_N;i++){
+    frames.push(grabFrame());
+    st.innerHTML='capturing '+(i+1)+'/'+CAP_N;
+    await new Promise(r=>setTimeout(r, CAP_MS/CAP_N));
+  }
+  btn.classList.remove('recording'); btn.textContent='Reading sign…';
+  st.innerHTML='asking NVIDIA VLM…';
+  try{
+    const res=await fetch(OMNI_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({frames})});
+    const data=await res.json();
+    const sign=(data.sign||'UNKNOWN').toUpperCase();
+    showModel(data.model||'Nemotron VL');                // model badge: NVIDIA VLM read this
+    st.innerHTML='VLM: <b>'+sign+'</b> · '+(data.latency_ms||Math.round(performance.now()-t0))+'ms';
+    if(sign && sign!=='UNKNOWN'){
+      flashToken(sign, 0.9);
+      rec.conductIntent(sign);                           // speak it on the call (arrives back via on.spoken)
+    }
+  }catch(e){
+    st.innerHTML='VLM error (is omni server on :8788?)';
+    console.warn('[omni]', e);
+  }finally{
+    btn.textContent='Sign with movement';
+    capturing=false;
+  }
+}
+$('capture').onclick = captureMovementSign;
 
 rec.start().catch(e=>{
   $('ph').innerHTML='<div class="big">Camera needs permission</div><div class="sm">'+(e?.message||e)+'</div>';
