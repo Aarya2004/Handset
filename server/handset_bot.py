@@ -216,6 +216,10 @@ async def twilio_media(ws: WebSocket):
 
     print("[twilio-media] Twilio connected")
 
+    # Starlette requires accepting the WebSocket before reading from it.
+    # parse_telephony_websocket() reads the handshake immediately, so accept first.
+    await ws.accept()
+
     # Parse the Twilio handshake to get stream_sid and call_sid.
     _, call_data = await parse_telephony_websocket(ws)
     stream_sid = call_data["stream_id"]
@@ -270,6 +274,15 @@ async def twilio_media(ws: WebSocket):
 
     # Expose the worker globally so /signal can inject speech.
     _pipeline_worker = worker
+
+    @transport.event_handler("on_client_connected")
+    async def on_client_connected(transport, client):
+        # Speak a greeting the instant the call connects, so the answerer hears
+        # audio immediately (proves the speech path with zero timing race).
+        print("[twilio-media] call connected — speaking greeting")
+        await worker.queue_frames(
+            [TTSSpeakFrame(text="Hi, this is Handset. You're connected.")]
+        )
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
