@@ -26,8 +26,8 @@ import {
   FilesetResolver,
 } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs";
 
-const HOLD_VEL = 0.018; // below this avg landmark velocity => "held"
-const HOLD_FRAMES = 5; // consecutive held frames before commit
+const HOLD_VEL = 0.03; // below this avg landmark velocity => "held" (raised from 0.018: tolerate natural hand tremor so commits aren't 1s+)
+const HOLD_FRAMES = 3; // consecutive held frames before commit (lowered from 5: ~100ms of stability is enough)
 const ACCEPT = 0.85,
   ASK = 0.55; // confidence gates
 const TAU = 0.55; // distance scale for confidence
