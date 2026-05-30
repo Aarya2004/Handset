@@ -938,6 +938,184 @@
         background: var(--sage-deep);
       }
 
+      /* ───────────────── view router ───────────────── */
+      .view { display: none; min-height: 0; }
+      .view.on { display: block; animation: viewin 0.4s cubic-bezier(0.2, 0.8, 0.2, 1); }
+      .view.board-view.on { display: grid; }
+      @keyframes viewin {
+        from { opacity: 0; transform: translateY(10px); }
+        to { opacity: 1; transform: none; }
+      }
+      .scroller { height: 100%; overflow: auto; padding-right: 4px; }
+      .scroller::-webkit-scrollbar { width: 7px; }
+      .scroller::-webkit-scrollbar-thumb { background: var(--line-2); border-radius: 7px; }
+
+      /* section title inside a view */
+      .vhead { display: flex; align-items: flex-end; gap: 14px; margin: 2px 2px 18px; }
+      .vhead h1 {
+        font-family: var(--serif); font-weight: 600; font-size: 27px;
+        letter-spacing: -0.02em; margin: 0; line-height: 1;
+      }
+      .vhead .vtag { font-size: 13px; color: var(--ink-soft); }
+      .vhead .sp { flex: 1; }
+
+      /* stat tiles row */
+      .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 16px; }
+      .stat {
+        background: var(--paper); border: 1px solid var(--line); border-radius: var(--r-md);
+        padding: 16px 18px; box-shadow: var(--shadow-sm);
+      }
+      .stat .sk {
+        font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase;
+        color: var(--ink-faint); font-weight: 600; display: flex; align-items: center; gap: 7px;
+      }
+      .stat .sk svg { width: 14px; height: 14px; }
+      .stat .sv {
+        font-family: var(--serif); font-weight: 600; font-size: 30px; letter-spacing: -0.02em;
+        margin-top: 8px; line-height: 1; color: var(--ink); font-feature-settings: "tnum" 1;
+      }
+      .stat .sv small { font-size: 14px; color: var(--ink-faint); font-family: var(--sans); font-weight: 500; }
+      .stat .delta { font-size: 11.5px; font-weight: 600; margin-top: 7px; display: flex; align-items: center; gap: 4px; }
+      .stat .delta.up { color: var(--good); }
+      .stat .delta.down { color: var(--rose); }
+
+      /* generic panel */
+      .panel {
+        background: var(--paper); border: 1px solid var(--line); border-radius: var(--r-lg);
+        box-shadow: var(--shadow); padding: 20px 22px; margin-bottom: 16px;
+      }
+      .panel > .ph {
+        display: flex; align-items: center; gap: 10px; margin-bottom: 18px;
+      }
+      .panel > .ph h3 {
+        font-family: var(--serif); font-weight: 600; font-size: 16px;
+        letter-spacing: -0.01em; margin: 0;
+      }
+      .panel > .ph .legend {
+        margin-left: auto; display: flex; gap: 14px; font-size: 11.5px; color: var(--ink-soft);
+      }
+      .panel > .ph .legend span { display: flex; align-items: center; gap: 6px; }
+      .panel > .ph .legend i { width: 9px; height: 9px; border-radius: 3px; }
+
+      .grid2 { display: grid; grid-template-columns: 1.7fr 1fr; gap: 16px; align-items: start; }
+
+      /* line chart svg — fixed aspect (meet) so the line/dots never stretch */
+      .chart { width: 100%; height: 220px; display: block; overflow: visible; }
+      .chart .grid-l { stroke: var(--line); stroke-width: 1; }
+      .chart .axis-t { fill: var(--ink-faint); font-size: 10px; font-family: var(--sans); }
+      .chart .axis-x { fill: var(--ink-faint); font-size: 9.5px; font-family: var(--sans); letter-spacing: 0.02em; opacity: 0; transition: opacity 0.5s 0.7s; }
+      .chart.drawn .axis-x { opacity: 1; }
+      /* live (latest) point: filled + soft expanding pulse ring */
+      .chart .dot-live { fill: var(--sage-deep); opacity: 0; transition: opacity 0.3s 1.1s; }
+      .chart.drawn .dot-live { opacity: 1; }
+      .chart .dot-live-ring { fill: none; stroke: var(--sage); stroke-width: 2; opacity: 0; transform-box: fill-box; transform-origin: center; }
+      .chart.drawn .dot-live-ring { animation: livepulse 2s ease-out 1.3s infinite; }
+      @keyframes livepulse {
+        0% { opacity: 0.6; transform: scale(0.6); }
+        70% { opacity: 0; transform: scale(2.4); }
+        100% { opacity: 0; transform: scale(2.4); }
+      }
+      .chart .area { fill: url(#sageFade); opacity: 0; transition: opacity 0.6s 0.5s; }
+      .chart.drawn .area { opacity: 1; }
+      .chart .line {
+        fill: none; stroke: var(--sage); stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round;
+        stroke-dasharray: var(--len); stroke-dashoffset: var(--len);
+        transition: stroke-dashoffset 1.1s cubic-bezier(0.4, 0, 0.2, 1);
+      }
+      .chart.drawn .line { stroke-dashoffset: 0; }
+      .chart .dot { fill: var(--sage); opacity: 0; transition: opacity 0.3s; }
+      .chart.drawn .dot { opacity: 1; }
+      .chart .dot:hover { r: 5; }
+
+      /* donut */
+      .donut-wrap { display: flex; align-items: center; gap: 20px; }
+      .donut { width: 132px; height: 132px; flex: none; }
+      .donut .track { fill: none; stroke: var(--paper-2); stroke-width: 13; }
+      .donut .arc {
+        fill: none; stroke: var(--sage); stroke-width: 13; stroke-linecap: round;
+        transform: rotate(-90deg); transform-origin: center;
+        stroke-dasharray: var(--c); stroke-dashoffset: var(--c);
+        transition: stroke-dashoffset 1.2s cubic-bezier(0.4, 0, 0.2, 1) 0.3s;
+      }
+      .donut.drawn .arc { stroke-dashoffset: var(--off); }
+      .donut .ctr { font-family: var(--serif); font-weight: 600; font-size: 26px; fill: var(--ink); }
+      .donut .ctr-l { fill: var(--ink-faint); font-size: 10px; font-weight: 600; letter-spacing: 0.06em; }
+      .donut-legend { display: flex; flex-direction: column; gap: 11px; }
+      .donut-legend .dl { display: flex; align-items: center; gap: 9px; font-size: 13px; color: var(--ink-soft); }
+      .donut-legend .dl b { color: var(--ink); font-weight: 600; margin-left: auto; font-feature-settings: "tnum" 1; }
+      .donut-legend i { width: 10px; height: 10px; border-radius: 3px; flex: none; }
+
+      /* horizontal bars (top signs / usage) */
+      .barlist { display: flex; flex-direction: column; gap: 13px; }
+      .barrow { display: grid; grid-template-columns: 96px 1fr 42px; align-items: center; gap: 12px; }
+      .barrow .bl { font-size: 13px; font-weight: 600; color: var(--ink); }
+      .barrow .bt { height: 9px; border-radius: 5px; background: var(--paper-2); overflow: hidden; }
+      .barrow .bt i {
+        display: block; height: 100%; width: 0; border-radius: 5px;
+        background: linear-gradient(90deg, var(--sage), var(--sage-deep));
+        transition: width 0.9s cubic-bezier(0.3, 0.9, 0.3, 1);
+      }
+      .barrow .bn { font-size: 12.5px; font-weight: 600; color: var(--ink-soft); text-align: right; font-feature-settings: "tnum" 1; }
+
+      /* vocabulary view grid */
+      .vgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(184px, 1fr)); gap: 13px; }
+      .vcard {
+        background: var(--paper); border: 1px solid var(--line); border-radius: var(--r-md);
+        padding: 15px 16px; box-shadow: var(--shadow-sm); cursor: default;
+        transition: transform 0.16s, box-shadow 0.16s, border-color 0.16s;
+        animation: chipin 0.45s cubic-bezier(0.2, 0.8, 0.2, 1) backwards;
+      }
+      .vcard:hover { transform: translateY(-2px); box-shadow: var(--shadow); border-color: var(--line-2); }
+      .vcard .vtop { display: flex; align-items: center; gap: 9px; margin-bottom: 12px; }
+      .vcard .vmark {
+        width: 30px; height: 30px; border-radius: 9px; background: var(--sage-soft); color: var(--sage-deep);
+        display: grid; place-items: center; font-size: 13px; font-weight: 700; flex: none;
+      }
+      .vcard .vname { font-family: var(--serif); font-weight: 600; font-size: 16px; letter-spacing: -0.01em; }
+      .vcard .vsub { font-size: 11px; color: var(--ink-faint); margin-top: 1px; }
+      .vcard .vacc { display: flex; align-items: center; justify-content: space-between; font-size: 11px; color: var(--ink-soft); margin-bottom: 5px; }
+      .vcard .vacc b { color: var(--sage-deep); font-weight: 700; font-feature-settings: "tnum" 1; }
+      .vcard .vbar { height: 6px; border-radius: 4px; background: var(--paper-2); overflow: hidden; }
+      .vcard .vbar i { display: block; height: 100%; width: 0; border-radius: 4px; background: var(--sage); transition: width 0.8s cubic-bezier(0.3, 0.9, 0.3, 1); }
+      .vcard.add {
+        border: 1.5px dashed var(--line-2); background: transparent; display: flex; flex-direction: column;
+        align-items: center; justify-content: center; gap: 9px; color: var(--sage-deep);
+        font-weight: 600; font-size: 13.5px; cursor: pointer; min-height: 120px;
+      }
+      .vcard.add:hover { border-color: var(--sage); background: var(--sage-tint); transform: none; }
+      .vcard.add svg { width: 22px; height: 22px; }
+
+      /* history view list */
+      .hlist { display: flex; flex-direction: column; gap: 12px; }
+      .hcard {
+        background: var(--paper); border: 1px solid var(--line); border-radius: var(--r-md);
+        box-shadow: var(--shadow-sm); padding: 16px 18px; display: grid;
+        grid-template-columns: 46px 1fr auto; gap: 15px; align-items: center;
+        cursor: pointer; transition: transform 0.16s, box-shadow 0.16s, border-color 0.16s;
+        animation: chipin 0.45s cubic-bezier(0.2, 0.8, 0.2, 1) backwards;
+      }
+      .hcard:hover { transform: translateY(-1px); box-shadow: var(--shadow); border-color: var(--line-2); }
+      .hcard .havatar {
+        width: 46px; height: 46px; border-radius: 13px; background: var(--clay-soft); color: var(--clay);
+        display: grid; place-items: center; font-family: var(--serif); font-weight: 600; font-size: 17px; flex: none;
+      }
+      .hcard .hmid .hwho { font-family: var(--serif); font-weight: 600; font-size: 15.5px; letter-spacing: -0.01em; }
+      .hcard .hmid .hprev {
+        font-family: var(--read); font-size: 13px; color: var(--ink-soft); margin-top: 3px;
+        font-style: italic; max-width: 460px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      }
+      .hcard .hmeta { text-align: right; display: flex; flex-direction: column; gap: 5px; align-items: flex-end; }
+      .hcard .hmeta .hwhen { font-size: 12px; color: var(--ink-faint); }
+      .hcard .hmeta .htags { display: flex; gap: 5px; }
+      .hcard .hmeta .htag {
+        font-size: 10.5px; font-weight: 600; color: var(--sage-deep); background: var(--sage-soft);
+        padding: 3px 8px; border-radius: 999px;
+      }
+      .hcard .hmeta .hdur {
+        font-size: 11px; font-weight: 600; color: var(--ink-soft); display: flex; align-items: center; gap: 5px;
+      }
+      .hcard .hmeta .hdur svg { width: 12px; height: 12px; }
+
       .loading {
         position: fixed;
         inset: 0;
@@ -1068,6 +1246,88 @@
               <div class="empty" id="capsEmpty">The conversation will appear here as it happens.</div>
             </div>
           </section>
+        </div>
+
+        <!-- ───────── Vocabulary view ───────── -->
+        <div class="view" id="view-vocab">
+          <div class="scroller">
+            <div class="vhead">
+              <div>
+                <h1>Vocabulary</h1>
+                <div class="vtag">Your personal signs — learned on-device, private to you.</div>
+              </div>
+              <div class="sp"></div>
+              <span class="status"><span class="dot" style="background:var(--good)"></span><span id="vocabCount2">— signs</span></span>
+            </div>
+            <div class="stats" id="vocabStats"></div>
+            <div class="panel">
+              <div class="ph"><h3>All signs</h3><div class="legend"><span><i style="background:var(--sage)"></i>recognition accuracy</span></div></div>
+              <div class="vgrid" id="vgrid"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ───────── Insights view ───────── -->
+        <div class="view" id="view-insights">
+          <div class="scroller">
+            <div class="vhead">
+              <div>
+                <h1>Insights</h1>
+                <div class="vtag">How your signing has performed over the last 14 days.</div>
+              </div>
+              <div class="sp"></div>
+              <span class="status"><span class="dot" style="background:var(--good)"></span>last 14 days</span>
+            </div>
+            <div class="stats" id="insightStats"></div>
+            <div class="panel">
+              <div class="ph">
+                <h3>Recognitions per day</h3>
+                <div class="legend"><span><i style="background:var(--sage)"></i>signs recognized</span></div>
+              </div>
+              <svg class="chart" id="lineChart" viewBox="0 0 720 210" preserveAspectRatio="xMidYMid meet">
+                <defs>
+                  <linearGradient id="sageFade" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stop-color="#5f7a5b" stop-opacity="0.22"/>
+                    <stop offset="100%" stop-color="#5f7a5b" stop-opacity="0"/>
+                  </linearGradient>
+                </defs>
+              </svg>
+            </div>
+            <div class="grid2">
+              <div class="panel">
+                <div class="ph"><h3>Most-used signs</h3></div>
+                <div class="barlist" id="topSigns"></div>
+              </div>
+              <div class="panel">
+                <div class="ph"><h3>Recognition outcomes</h3></div>
+                <div class="donut-wrap">
+                  <svg class="donut" id="donut" viewBox="0 0 120 120">
+                    <circle class="track" cx="60" cy="60" r="48"/>
+                    <circle class="arc" cx="60" cy="60" r="48"/>
+                    <text class="ctr" x="60" y="58" text-anchor="middle" dominant-baseline="middle" id="donutPct">0%</text>
+                    <text class="ctr-l" x="60" y="76" text-anchor="middle" id="donutLbl">ACCURATE</text>
+                  </svg>
+                  <div class="donut-legend" id="donutLegend"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ───────── History view ───────── -->
+        <div class="view" id="view-history">
+          <div class="scroller">
+            <div class="vhead">
+              <div>
+                <h1>History</h1>
+                <div class="vtag">Past calls placed through Handset.</div>
+              </div>
+              <div class="sp"></div>
+              <span class="status"><span class="dot"></span><span id="histCount">— calls</span></span>
+            </div>
+            <div class="stats" id="histStats"></div>
+            <div class="hlist" id="hlist"></div>
+          </div>
         </div>
       </main>
     </div>
@@ -1545,6 +1805,227 @@
       window.profile = profile;
       $("newCall").onclick = () => setCall(true);
       $("endCall").onclick = () => setCall(false);
+
+      // ════════════════ view router + analytics views ════════════════
+      // Dummy-but-believable data for Vocabulary / Insights / History. These are
+      // presentation views (not on the live recognition path); they render from
+      // the data below and animate on first open. The live "call" view is real.
+      const SIGN_DATA = [
+        { label: "HELLO", uses: 142, acc: 98 },
+        { label: "APPOINTMENT", uses: 96, acc: 94 },
+        { label: "THANK-YOU", uses: 88, acc: 91 },
+        { label: "YES", uses: 134, acc: 99 },
+        { label: "NO", uses: 119, acc: 97 },
+        { label: "THURSDAY", uses: 41, acc: 88 },
+        { label: "CANCEL", uses: 53, acc: 92 },
+        { label: "WAIT", uses: 67, acc: 95 },
+        { label: "REPEAT", uses: 72, acc: 93 },
+        { label: "WATER", uses: 38, acc: 96 },
+      ];
+      // recognitions/day over 14 days
+      const DAILY = [18, 24, 31, 22, 40, 52, 47, 38, 61, 55, 72, 64, 83, 91];
+      const CALL_HISTORY = [
+        { who: "Dr. Patel's office", prev: "Thursday works for me. Thank you so much.", when: "Today · 2:14 PM", dur: "4:32", tags: ["APPOINTMENT", "THURSDAY"] },
+        { who: "Aarya", prev: "Hi there. One moment, please.", when: "Today · 11:02 AM", dur: "2:08", tags: ["HELLO", "WAIT"] },
+        { who: "City Pharmacy", prev: "I'd like to cancel that. Thank you.", when: "Yesterday · 5:47 PM", dur: "3:19", tags: ["CANCEL"] },
+        { who: "Mom", prev: "Yes, that works. Could you repeat that?", when: "Yesterday · 1:30 PM", dur: "6:51", tags: ["YES", "REPEAT"] },
+        { who: "Dental clinic", prev: "Hi, I'd like to book an appointment.", when: "Mon · 9:15 AM", dur: "5:04", tags: ["APPOINTMENT", "HELLO"] },
+      ];
+
+      const ICON = {
+        signs: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 7v14"/><path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"/></svg>',
+        bolt: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/></svg>',
+        target: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>',
+        phone: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.91.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92z"/></svg>',
+        clock: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>',
+      };
+      const arrowUp = '<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17 17 7M9 7h8v8"/></svg>';
+
+      function statTile(k, v, unit, delta, dir, icon) {
+        return `<div class="stat"><div class="sk">${icon || ""}${k}</div>
+          <div class="sv">${v}${unit ? `<small> ${unit}</small>` : ""}</div>
+          ${delta ? `<div class="delta ${dir}">${dir === "up" ? arrowUp : ""}${delta}</div>` : ""}</div>`;
+      }
+
+      // ---- Vocabulary view ----
+      function buildVocab() {
+        const total = SIGN_DATA.length;
+        const totalUses = SIGN_DATA.reduce((s, d) => s + d.uses, 0);
+        const avgAcc = Math.round(SIGN_DATA.reduce((s, d) => s + d.acc, 0) / total);
+        const best = [...SIGN_DATA].sort((a, b) => b.uses - a.uses)[0];
+        $("vocabCount2").textContent = `${total} signs`;
+        $("vocabStats").innerHTML =
+          statTile("Signs learned", total, "", "+3 this week", "up", ICON.signs) +
+          statTile("Total recognitions", totalUses.toLocaleString(), "", null, null, ICON.bolt) +
+          statTile("Avg accuracy", avgAcc, "%", "+2.1%", "up", ICON.target) +
+          statTile("Most used", best.label.charAt(0) + best.label.slice(1).toLowerCase(), "", `${best.uses}×`, "up", ICON.phone);
+        const g = $("vgrid");
+        g.innerHTML = "";
+        SIGN_DATA.forEach((d, i) => {
+          const el = document.createElement("div");
+          el.className = "vcard";
+          el.style.animationDelay = i * 35 + "ms";
+          const nice = d.label.charAt(0) + d.label.slice(1).toLowerCase();
+          el.innerHTML = `<div class="vtop"><span class="vmark">${d.label[0]}</span>
+            <div><div class="vname">${nice}</div><div class="vsub">${d.uses} recognitions</div></div></div>
+            <div class="vacc"><span>accuracy</span><b>${d.acc}%</b></div>
+            <div class="vbar"><i data-w="${d.acc}"></i></div>`;
+          g.appendChild(el);
+        });
+        const add = document.createElement("div");
+        add.className = "vcard add";
+        add.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5v14"/></svg>Teach a new sign`;
+        add.onclick = openModal;
+        g.appendChild(add);
+        requestAnimationFrame(() =>
+          requestAnimationFrame(() => g.querySelectorAll(".vbar i").forEach((i) => (i.style.width = i.dataset.w + "%"))));
+      }
+
+      // ---- Insights view ----
+      function buildInsights() {
+        const total = DAILY.reduce((s, d) => s + d, 0);
+        const avgLat = 208;
+        const avgAcc = Math.round(SIGN_DATA.reduce((s, d) => s + d.acc, 0) / SIGN_DATA.length);
+        $("insightStats").innerHTML =
+          statTile("Recognitions", total.toLocaleString(), "", "+34% vs prev", "up", ICON.bolt) +
+          statTile("Avg latency", avgLat, "ms", "−18ms faster", "up", ICON.clock) +
+          statTile("Accuracy", avgAcc, "%", "+2.1%", "up", ICON.target) +
+          statTile("Active days", DAILY.length, "/ 14", null, null, ICON.phone);
+        renderLineChart(DAILY);
+        renderTopSigns();
+        renderDonut(avgAcc);
+      }
+
+      function renderLineChart(data) {
+        const svg = $("lineChart");
+        // clear prior content (keep <defs>)
+        svg.querySelectorAll(".grid-l,.axis-t,.axis-x,.area,.line,.dot,.dot-live,.dot-live-ring").forEach((n) => n.remove());
+        const W = 720, H = 210, padL = 34, padR = 14, padT = 14, padB = 30;
+        const max = Math.max(...data) * 1.15;
+        const x = (i) => padL + (i * (W - padL - padR)) / (data.length - 1);
+        const y = (v) => padT + (1 - v / max) * (H - padT - padB);
+        const ns = "http://www.w3.org/2000/svg";
+        const mk = (t, a) => { const e = document.createElementNS(ns, t); for (const k in a) e.setAttribute(k, a[k]); return e; };
+
+        // horizontal gridlines + y labels
+        [0, 0.5, 1].forEach((f) => {
+          const gv = max * f, gy = y(gv);
+          svg.appendChild(mk("line", { class: "grid-l", x1: padL, x2: W - padR, y1: gy, y2: gy }));
+          const tx = mk("text", { class: "axis-t", x: padL - 8, y: gy + 3, "text-anchor": "end" });
+          tx.textContent = Math.round(gv);
+          svg.appendChild(tx);
+        });
+        // x-axis day labels (every other day to avoid crowding)
+        data.forEach((v, i) => {
+          if (i % 2 !== 0 && i !== data.length - 1) return;
+          const tx = mk("text", { class: "axis-x", x: x(i), y: H - 8, "text-anchor": "middle" });
+          tx.textContent = i === data.length - 1 ? "today" : "d" + (i + 1);
+          svg.appendChild(tx);
+        });
+
+        // smooth curve (Catmull-Rom → cubic Bézier) so the line reads polished, not jagged
+        const pts = data.map((v, i) => [x(i), y(v)]);
+        const smooth = (p) => {
+          let d = `M ${p[0][0]} ${p[0][1]}`;
+          for (let i = 0; i < p.length - 1; i++) {
+            const p0 = p[i - 1] || p[i], p1 = p[i], p2 = p[i + 1], p3 = p[i + 2] || p2;
+            const c1x = p1[0] + (p2[0] - p0[0]) / 6, c1y = p1[1] + (p2[1] - p0[1]) / 6;
+            const c2x = p2[0] - (p3[0] - p1[0]) / 6, c2y = p2[1] - (p3[1] - p1[1]) / 6;
+            d += ` C ${c1x} ${c1y}, ${c2x} ${c2y}, ${p2[0]} ${p2[1]}`;
+          }
+          return d;
+        };
+        const path = smooth(pts);
+        svg.appendChild(mk("path", { class: "area", d: `${path} L ${x(data.length - 1)} ${H - padB} L ${x(0)} ${H - padB} Z` }));
+        const line = mk("path", { class: "line", d: path });
+        svg.appendChild(line);
+        line.style.setProperty("--len", line.getTotalLength());
+
+        // dots (last one gets a live pulse)
+        data.forEach((v, i) => {
+          const last = i === data.length - 1;
+          if (last) {
+            const ring = mk("circle", { class: "dot-live-ring", cx: x(i), cy: y(v), r: 5 });
+            svg.appendChild(ring);
+            const c = mk("circle", { class: "dot-live", cx: x(i), cy: y(v), r: 4 });
+            const t = mk("title"); t.textContent = `Today: ${v}`; c.appendChild(t);
+            svg.appendChild(c);
+          } else {
+            const c = mk("circle", { class: "dot", cx: x(i), cy: y(v), r: 3.4 });
+            c.style.transitionDelay = 0.9 + i * 0.04 + "s";
+            const t = mk("title"); t.textContent = `Day ${i + 1}: ${v}`; c.appendChild(t);
+            svg.appendChild(c);
+          }
+        });
+        svg.classList.remove("drawn");
+        requestAnimationFrame(() => requestAnimationFrame(() => svg.classList.add("drawn")));
+      }
+
+      function renderTopSigns() {
+        const top = [...SIGN_DATA].sort((a, b) => b.uses - a.uses).slice(0, 5);
+        const max = top[0].uses;
+        const c = $("topSigns");
+        c.innerHTML = "";
+        top.forEach((d) => {
+          const nice = d.label.charAt(0) + d.label.slice(1).toLowerCase();
+          const row = document.createElement("div");
+          row.className = "barrow";
+          row.innerHTML = `<span class="bl">${nice}</span><span class="bt"><i data-w="${Math.round((d.uses / max) * 100)}"></i></span><span class="bn">${d.uses}</span>`;
+          c.appendChild(row);
+        });
+        requestAnimationFrame(() =>
+          requestAnimationFrame(() => c.querySelectorAll(".bt i").forEach((i) => (i.style.width = i.dataset.w + "%"))));
+      }
+
+      function renderDonut(acc) {
+        const donut = $("donut"), arc = donut.querySelector(".arc");
+        const r = 48, circ = 2 * Math.PI * r;
+        arc.style.setProperty("--c", circ);
+        arc.style.setProperty("--off", circ * (1 - acc / 100));
+        $("donutPct").textContent = acc + "%";
+        const ambiguous = Math.round((100 - acc) * 0.6), missed = 100 - acc - ambiguous;
+        $("donutLegend").innerHTML =
+          `<div class="dl"><i style="background:var(--sage)"></i>Recognized<b>${acc}%</b></div>
+           <div class="dl"><i style="background:var(--gold)"></i>Confirmed by agent<b>${ambiguous}%</b></div>
+           <div class="dl"><i style="background:var(--paper-2);border:1px solid var(--line-2)"></i>Re-signed<b>${missed}%</b></div>`;
+        donut.classList.remove("drawn");
+        requestAnimationFrame(() => requestAnimationFrame(() => donut.classList.add("drawn")));
+      }
+
+      // ---- History view ----
+      function buildHistory() {
+        const totalMin = CALL_HISTORY.reduce((s, c) => { const [m, sec] = c.dur.split(":").map(Number); return s + m + sec / 60; }, 0);
+        $("histCount").textContent = `${CALL_HISTORY.length} calls`;
+        $("histStats").innerHTML =
+          statTile("Calls placed", CALL_HISTORY.length, "", "+2 today", "up", ICON.phone) +
+          statTile("Talk time", totalMin.toFixed(0), "min", null, null, ICON.clock) +
+          statTile("Avg duration", (totalMin / CALL_HISTORY.length).toFixed(1), "min", null, null, ICON.clock) +
+          statTile("Signs used", "11", "", "+4", "up", ICON.signs);
+        const c = $("hlist");
+        c.innerHTML = "";
+        CALL_HISTORY.forEach((h, i) => {
+          const el = document.createElement("div");
+          el.className = "hcard";
+          el.style.animationDelay = i * 45 + "ms";
+          const tags = h.tags.map((t) => `<span class="htag">${t.charAt(0) + t.slice(1).toLowerCase()}</span>`).join("");
+          el.innerHTML = `<div class="havatar">${h.who[0]}</div>
+            <div class="hmid"><div class="hwho">${h.who}</div><div class="hprev">"${h.prev}"</div></div>
+            <div class="hmeta"><span class="hwhen">${h.when}</span><span class="htags">${tags}</span>
+              <span class="hdur">${ICON.clock}${h.dur}</span></div>`;
+          el.onclick = () => toast(`Opening call with ${h.who}…`);
+          c.appendChild(el);
+        });
+      }
+
+      const VIEW_BUILDERS = { vocab: buildVocab, insights: buildInsights, history: buildHistory };
+      function switchView(name) {
+        document.querySelectorAll(".nav a").forEach((a) => a.classList.toggle("on", a.dataset.view === name));
+        document.querySelectorAll(".view").forEach((v) => v.classList.remove("on"));
+        $("view-" + name).classList.add("on");
+        VIEW_BUILDERS[name] && VIEW_BUILDERS[name](); // rebuild → re-animate each visit
+      }
+      document.querySelectorAll(".nav a").forEach((a) =>
+        a.addEventListener("click", () => switchView(a.dataset.view)));
 
       // ---------- boot ----------
       async function boot() {
