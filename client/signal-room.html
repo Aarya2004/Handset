@@ -50,10 +50,12 @@
   .lat.show{display:inline}
   .lat b{color:var(--signal); font-weight:500}
 
-  /* HERO camera */
-  .stage{position:absolute; inset:0; background:#070a0e; overflow:hidden}
-  .stage video{position:absolute; inset:0; width:100%; height:100%; object-fit:cover; transform:scaleX(-1)}
-  .stage canvas{position:absolute; inset:0; width:100%; height:100%; transform:scaleX(-1); pointer-events:none}
+  /* HERO camera — contain (not cover) so the whole upper body + hands are visible,
+     not a cropped face close-up. Centered in the stage. */
+  .stage{position:absolute; inset:0; background:#070a0e; overflow:hidden; display:flex; align-items:center; justify-content:center}
+  .stage video{max-width:100%; max-height:100%; object-fit:contain; transform:scaleX(-1)}
+  .stage canvas{position:absolute; pointer-events:none; transform:scaleX(-1)}
+  .stage.ready .ph{opacity:0; pointer-events:none}  /* hide placeholder once camera is live */
   .stage::after{content:""; position:absolute; inset:0; pointer-events:none; box-shadow:inset 0 0 0 0 var(--signal); transition:box-shadow .25s}
   .stage.live::after{box-shadow:inset 0 0 120px rgba(52,229,176,.16)}
   .ph{position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px; color:var(--faint)}
@@ -143,15 +145,23 @@ function showModel(modelLabel){           // model badge — which NVIDIA model 
   $('badge').classList.add('show');
   $('badge-name').textContent = modelLabel;
 }
-function drawLandmarks(lm){
+function sizeCanvasToVideo(){
+  // overlay must match the DISPLAYED video rect (contain letterboxes it), so landmarks align
   const c=$('overlay'), v=$('video');
-  if(!lm || !lm.length){ c.getContext('2d').clearRect(0,0,c.width,c.height); return; }
-  c.width=v.videoWidth||c.clientWidth; c.height=v.videoHeight||c.clientHeight;
+  const r=v.getBoundingClientRect();
+  c.style.width=r.width+'px'; c.style.height=r.height+'px';
+  c.style.left=r.left+'px'; c.style.top=r.top+'px';
+  c.width=r.width; c.height=r.height;
+}
+function drawLandmarks(lm){
+  const c=$('overlay');
   const ctx=c.getContext('2d'); ctx.clearRect(0,0,c.width,c.height);
-  ctx.fillStyle='#fff'; ctx.strokeStyle='rgba(52,229,176,.7)'; ctx.lineWidth=2;
+  if(!lm || !lm.length) return;
+  sizeCanvasToVideo();
+  ctx.fillStyle='#fff'; ctx.strokeStyle='rgba(52,229,176,.85)'; ctx.lineWidth=3;
   const E=[[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],[9,13],[13,14],[14,15],[15,16],[13,17],[17,18],[18,19],[19,20],[0,17]];
   for(const [a,b] of E){ ctx.beginPath(); ctx.moveTo(lm[a].x*c.width,lm[a].y*c.height); ctx.lineTo(lm[b].x*c.width,lm[b].y*c.height); ctx.stroke(); }
-  for(const p of lm){ ctx.beginPath(); ctx.arc(p.x*c.width,p.y*c.height,3,0,7); ctx.fill(); }
+  for(const p of lm){ ctx.beginPath(); ctx.arc(p.x*c.width,p.y*c.height,4,0,7); ctx.fill(); }
 }
 function pushCaption(who,text){
   const c=$('captions');
@@ -188,7 +198,7 @@ const rec = createRecognizer({
   video: $('video'),
   bridgeUrl: 'ws://localhost:8787/signal',
   on: {
-    ready(){ renderVocab(rec.getLexicon ? (rec.getLexicon()||[]) : []); },
+    ready(){ $('stage').classList.add('ready'); sizeCanvasToVideo(); renderVocab(rec.getLexicon ? (rec.getLexicon()||[]) : []); },
     frame(lm){ drawLandmarks(lm); },
     reading(token, conf){ if(conf>0.4){ $('token').classList.add('show'); $('token-word').textContent=token; $('token-meter').style.width=Math.round(conf*100)+'%'; } },
     sign(token, conf, latencyMs){ flashToken(token, conf); if(latencyMs) showLatency(latencyMs); },
