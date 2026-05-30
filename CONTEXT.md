@@ -32,13 +32,23 @@
 - **Conduct path** — token → Nemotron expands to a natural sentence.
 - **Word boosting** — biasing the hearing-side ASR toward the user's personal vocabulary.
 
+## Product framing (refined)
+
+This is an agent that **conducts transactional calls** (clinic/front-desk/pharmacy) — NOT a
+friend relay. A friend relay = redundant with Nagish + needs unsolved continuous ASL. The
+agent expands signed _intent_ and handles the receptionist's follow-ups. Hero path stays
+verbatim for reliability; the conduct path is the non-redundant differentiator.
+
 ## Status (update as we go)
 
 - ✅ Client recognition + "teach a sign" enrollment + latency HUD — built, JS parses clean.
 - ✅ Bridge WS proven end-to-end (sign token → spoken aloud), no keys.
-- ⬜ Real Twilio call leg (needs keys).
-- ⬜ Hearing-side ASR → captions.
-- ⬜ Word-boosting lexicon. ⬜ Cekura before/after card.
+- ✅ **Conduct path (the AGENT differentiator)** — Nemotron expands noisy signs → real sentence,
+  proven: "APPOINTMENT, T,H,U,R,Z,D,A,Y" → "I'd like to schedule an appointment for Thursday."
+- ⬜ Real Twilio call leg (Aarya's bot — needs Twilio + Gradium keys).
+- ⬜ Hearing-side ASR → captions (Aarya's bot).
+- ⬜ Cekura before/after card (BLOCKED: needs CEKURA_API_KEY — MCP returns 401).
+- ⬜ Word-boosting lexicon (after the hero loop is live).
 
 ## Stack & criteria
 
