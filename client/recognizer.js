@@ -32,6 +32,9 @@ const ACCEPT = 0.7,
   ASK = 0.45; // confidence gates (loosened so natural signing variation commits fast, not after 4s)
 const TAU = 1.2; // distance scale for confidence (raised from 0.55: typical sign distances now map to high confidence)
 const COOLDOWN = 700; // ms between same-token emissions (lowered for a more live/continuous feel)
+const PAUSE_MS = 1500; // ms with no new sign before buffered signs become ONE spoken sentence
+const MAX_WORDS = 8; // hard cap — commit even without a pause (prevents never-commit on fluent signing)
+const MAX_SENTENCE_MS = 6000; // hard cap — commit after this long even if signs keep coming
 const CAP_FRAMES = 5; // frames captured per enrollment
 
 const WASM =
@@ -98,6 +101,24 @@ export function createRecognizer({
   }
   function saveLexicon() {
     localStorage.setItem("signal_lexicon", JSON.stringify([...lexicon]));
+  }
+  // Optional BASE LIBRARY: if the user hasn't taught any signs yet, load a bundled
+  // default_profile.json sitting next to recognizer.js (same {label:[[63 floats]...]} shape
+  // exportProfile() produces). Never clobbers a user's own taught signs; they augment it.
+  async function seedFromDefault() {
+    if (Object.keys(profile).length) return false;
+    try {
+      const res = await fetch(
+        new URL("./default_profile.json", import.meta.url),
+      );
+      if (!res.ok) return false;
+      const o = await res.json();
+      for (const k in o) profile[k] = o[k].map((a) => Float32Array.from(a));
+      saveProfile();
+      return Object.keys(profile).length > 0;
+    } catch {
+      return false;
+    }
   }
 
   // ---------- landmark math ----------
@@ -181,8 +202,54 @@ export function createRecognizer({
       emit("error", "bridge: " + e.message);
     }
   }
-  const wsSend = (obj) =>
-    bridge && bridge.readyState === 1 && bridge.send(JSON.stringify(obj));
+  const wsSend = (obj) => {
+    if (bridge && bridge.readyState === 1) {
+      bridge.send(JSON.stringify(obj));
+      return true;
+    }
+    return false; // caller can keep the payload + retry instead of silently dropping it
+  };
+
+  // ---------- sentence buffering: accumulate signs -> pause -> Nemotron forms a sentence ----------
+  let sentBuf = [],
+    lastSign = null,
+    pauseTimer = null,
+    sentenceStartT = 0;
+  function bufferSign(token, conf, ms) {
+    // Suppress the SAME held sign repeating frame-to-frame. A DELIBERATE re-raise of the same
+    // sign still fires, because handleRecognize resets lastSign whenever the hand moves between signs.
+    if (token === lastSign) return;
+    lastSign = token;
+    if (!sentBuf.length) sentenceStartT = performance.now(); // start the sentence clock
+    sentBuf.push(token);
+    emit("sign", token, conf, ms); // per-word — UI shows it accumulating
+    emit("word", token, [...sentBuf]);
+    clearTimeout(pauseTimer);
+    // Hard caps so a fluent signer (a new sign every <PAUSE_MS) still commits — never hangs.
+    if (
+      sentBuf.length >= MAX_WORDS ||
+      performance.now() - sentenceStartT >= MAX_SENTENCE_MS
+    ) {
+      commitSentence();
+      return;
+    }
+    pauseTimer = setTimeout(commitSentence, PAUSE_MS); // pause -> form the sentence
+  }
+  function commitSentence() {
+    if (!running) return; // never fire after stop()
+    if (!sentBuf.length) return;
+    clearTimeout(pauseTimer);
+    const intent = sentBuf.join(", ");
+    emit("sentence", intent); // UI: "forming…"
+    if (!wsSend({ type: "sign", token: intent, mode: "conduct" })) {
+      // Bridge mid-reconnect — KEEP the words + retry; never silently drop the sentence.
+      pauseTimer = setTimeout(commitSentence, 800);
+      return;
+    }
+    sentBuf = [];
+    lastSign = null;
+    sentenceStartT = 0;
+  }
 
   // ---------- recognition ----------
   function handleRecognize(v, vel, now) {
@@ -190,7 +257,10 @@ export function createRecognizer({
     if (stable) {
       if (heldCount === 0) heldStartT = now;
       heldCount++;
-    } else heldCount = 0;
+    } else {
+      heldCount = 0;
+      lastSign = null; // hand moved between signs — a deliberate repeat (e.g. YES YES) may fire again
+    }
 
     const probe = avgRecent(3) || v;
     const { token, conf } = classify(probe);
@@ -198,13 +268,8 @@ export function createRecognizer({
 
     if (heldCount >= HOLD_FRAMES && token) {
       if (conf >= ACCEPT) {
-        if (!(lastEmit.token === token && now - lastEmit.t < COOLDOWN)) {
-          lastEmit = { token, t: now };
-          heldCount = 0;
-          const text = PHRASE[token] || token.toLowerCase();
-          wsSend({ type: "sign", token, text, mode: "verbatim" });
-          emit("sign", token, conf, Math.round(now - heldStartT));
-        }
+        heldCount = 0;
+        bufferSign(token, conf, Math.round(now - heldStartT)); // accumulate -> sentence (dedupe inside)
       } else if (conf >= ASK && now - gateShown > 2000) {
         gateShown = now;
         enroll && (enroll._probe = probe);
@@ -276,6 +341,7 @@ export function createRecognizer({
         } catch (e) {}
         running = true;
         connectBridge();
+        await seedFromDefault(); // load the base sign library if the user has taught none yet
         emit("ready");
         loop();
       } catch (err) {
@@ -305,10 +371,34 @@ export function createRecognizer({
     conductIntent(intent) {
       wsSend({ type: "sign", token: intent, mode: "conduct" });
     },
+    // force the buffered signs to commit NOW (e.g. user taps "send") instead of waiting for the pause
+    commitNow() {
+      commitSentence();
+    },
+    // the signs accumulated so far this sentence (UI can render them live)
+    getBuffer() {
+      return [...sentBuf];
+    },
     getProfile() {
       return Object.fromEntries(
         Object.entries(profile).map(([k, v]) => [k, v.length]),
       );
+    },
+    // dump the taught vocabulary — paste into client/default_profile.json to ship a base library
+    exportProfile() {
+      const o = {};
+      for (const k in profile) o[k] = profile[k].map((a) => Array.from(a));
+      return o;
+    },
+    // load a base library of signs; merges by default (user's taught signs win unless replace:true)
+    importProfile(o, { replace = false } = {}) {
+      for (const k in o) {
+        const protos = o[k].map((a) => Float32Array.from(a));
+        if (replace || !profile[k]) profile[k] = protos;
+        else profile[k].push(...protos);
+      }
+      saveProfile();
+      return Object.keys(profile).length;
     },
     getLexicon() {
       return [...lexicon];
@@ -319,6 +409,11 @@ export function createRecognizer({
     },
     stop() {
       running = false;
+      clearTimeout(pauseTimer); // kill any pending commit so it can't fire post-stop
+      pauseTimer = null;
+      sentBuf = [];
+      lastSign = null;
+      sentenceStartT = 0;
       try {
         bridge && bridge.close();
       } catch {}
