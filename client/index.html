@@ -556,14 +556,14 @@
         width: 19px;
         height: 19px;
       }
-      .ctl.end {
-        background: var(--rose);
-        border-color: var(--rose);
-        color: #fff;
-        width: 52px;
+      /* camera-off state: muted/struck-through to read as "paused" */
+      .ctl.off {
+        background: var(--paper-2);
+        border-color: var(--line-2);
+        color: var(--ink-faint);
       }
-      .ctl.end:hover {
-        background: #a3564e;
+      .stage.camoff {
+        background: linear-gradient(160deg, #d9d6cc, #cfccbf);
       }
 
       /* ── vocabulary panel ── */
@@ -1233,11 +1233,12 @@
               <div class="reading"><span id="reading">Show your hand to begin…</span></div>
             </div>
             <div class="controls">
-              <button class="ctl" title="Mute"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/></svg></button>
-              <button class="ctl" title="Camera"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2"/></svg></button>
-              <button class="ctl motion" id="motionSign" title="Read motion sign with NVIDIA VLM"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12h4l3-8 6 16 3-8h4"/><path d="M4 20v-3M4 7V4M20 20v-3M20 7V4"/></svg></button>
-              <button class="ctl" title="Transcript"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h8M8 17h5"/></svg></button>
-              <button class="ctl end" id="endCall" title="End call"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7 2 2 0 0 1 1.72 2v3a2 2 0 0 1-2.18 2A19.79 19.79 0 0 1 3.07 8.63 19.5 19.5 0 0 1 0 .18"/><line x1="22" x2="2" y1="2" y2="22"/></svg></button>
+              <!-- Camera toggle: pause/resume the live video feed (real, toggles the track) -->
+              <button class="ctl" id="cameraToggle" title="Turn camera off">
+                <svg id="cameraIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 8-6 4 6 4V8Z"/><rect width="14" height="12" x="2" y="6" rx="2"/></svg>
+              </button>
+              <!-- Read a motion sign with the camera via NVIDIA Omni VLM (real: rec.readMotionSign) -->
+              <button class="ctl motion" id="motionSign" title="Read a motion sign (NVIDIA VLM)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12h4l3-8 6 16 3-8h4"/><path d="M4 20v-3M4 7V4M20 20v-3M20 7V4"/></svg></button>
             </div>
           </section>
 
@@ -1692,9 +1693,54 @@
       }
       window.setCall = setCall;
       window.pushCaption = pushCaption;
-      $("newCall").onclick = () => setCall(true);
-      $("endCall").onclick = () => setCall(false);
       $("motionSign").onclick = () => readMotionSign();
+
+      // ---- Start a call: really triggers the bot to place the outbound call ----
+      // Derives the bot's HTTP origin from the bridge WS URL and hits /call. In
+      // local-audio mode the bot speaks aloud instead of dialing — same button,
+      // it just kicks the session live either way.
+      function botHttpBase() {
+        try {
+          const u = new URL(BRIDGE_URL);
+          const proto = u.protocol === "wss:" ? "https:" : "http:";
+          return `${proto}//${u.host}`;
+        } catch { return "http://localhost:8790"; }
+      }
+      $("newCall").onclick = async () => {
+        const btn = $("newCall");
+        btn.disabled = true;
+        const base = botHttpBase();
+        const host = new URL(BRIDGE_URL).host; // tunnel/host Twilio should stream to
+        try {
+          const res = await fetch(`${base}/call?public_host=${encodeURIComponent(host)}`);
+          const data = await res.json().catch(() => ({}));
+          if (data.sid) { setCall(true); toast("Calling… answer your phone"); }
+          else if (data.spoken !== undefined || data.local_audio) { setCall(true); toast("Live — signs speak aloud"); }
+          else { toast(data.error ? "Call failed: " + data.error : "Call requested"); setCall(true); }
+        } catch (e) {
+          toast("Couldn't reach the bot");
+          console.warn("[call]", e);
+        } finally {
+          btn.disabled = false;
+        }
+      };
+
+      // ---- Camera toggle: really pauses/resumes the live video track ----
+      let cameraOn = true;
+      $("cameraToggle").onclick = () => {
+        const stream = $("video").srcObject;
+        const track = stream && stream.getVideoTracks && stream.getVideoTracks()[0];
+        if (!track) return;
+        cameraOn = !cameraOn;
+        track.enabled = cameraOn;                 // pause/resume the actual camera feed
+        const btn = $("cameraToggle");
+        btn.title = cameraOn ? "Turn camera off" : "Turn camera on";
+        btn.classList.toggle("off", !cameraOn);
+        $("stage").classList.toggle("camoff", !cameraOn);
+        // when off, clear the overlay so it doesn't freeze on the last frame
+        if (!cameraOn && ctx) ctx.clearRect(0, 0, overlay.width, overlay.height);
+        $("reading").textContent = cameraOn ? "Show your hand to begin…" : "Camera paused";
+      };
 
       // ════════════════ view router + analytics views ════════════════
       // Dummy-but-believable data for Vocabulary / Insights / History. These are
