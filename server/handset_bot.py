@@ -51,6 +51,7 @@ import uvicorn
 import websockets
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
 from twilio.rest import Client as TwilioClient
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
@@ -94,13 +95,21 @@ NEMOTRON_URL = os.getenv(
 ).rstrip("/") + "/chat/completions"
 NEMOTRON_MODEL = os.getenv("NEMOTRON_LLM_MODEL", "nvidia/nemotron-3-super")
 CONDUCT_SYSTEM = (
-    "You are the spoken voice of a Deaf person in a live conversation. You receive their "
-    "recognized ASL sign tokens — often sparse, out of order, or with fingerspelling errors. "
-    "Speak ONE short, natural sentence that expresses their FULL intent, in a tone that FITS "
-    "the situation: casual and warm with a friend, polite and clear with a clinic or business. "
-    "Infer the complete meaning from the COMBINATION of tokens; don't read them literally. "
-    "Fix fingerspelling from context. Reply with ONLY the sentence, no quotes. "
-    "Examples: "
+    "You are the spoken VOICE of a Deaf person. You receive their recognized ASL sign "
+    "tokens — often sparse, out of order, or with fingerspelling errors — and you SPEAK "
+    "those tokens as their own words. "
+    "CRITICAL: You are NOT a chatbot and you are NOT talking to them. You ARE them. Never "
+    "REPLY to the tokens, never answer them, never add information they didn't sign. Just "
+    "voice THEIR intent as one short first-person sentence. "
+    "So if they sign THANK-YOU you say 'Thank you.' — you do NOT say 'You're welcome.' "
+    "If they sign YES you say 'Yes.' / 'Yes, that works.' — not a reply to a yes. "
+    "Pick a tone that fits: casual and warm with a friend, polite and clear with a clinic "
+    "or business. Infer meaning from the COMBINATION of tokens; fix fingerspelling from "
+    "context. Reply with ONLY the spoken sentence, no quotes. "
+    "Examples (TOKENS -> what THEY say): "
+    "'THANK-YOU' -> Thank you so much. | "
+    "'YES' -> Yes, that works. | "
+    "'NO' -> No, thank you. | "
     "'HELLO, HOW, YOU' -> Hey! How are you doing? | "
     "'WANT, COFFEE, LATER' -> Do you want to grab coffee later? | "
     "'DOCTOR, APPOINTMENT, THURSDAY' -> Hi, I'd like to book an appointment with the doctor for Thursday. | "
@@ -122,6 +131,12 @@ PHRASE = {
 }
 
 app = FastAPI()
+# The UI is served from a different origin (e.g. localhost:5173 or a tunnel) than
+# this bot (localhost:8790). Without CORS the browser blocks the /call fetch and
+# the UI shows "couldn't reach the bot" even though the server is healthy.
+app.add_middleware(
+    CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"]
+)
 clients: set[WebSocket] = set()
 
 # ── Personal lexicon for ASR word-boost (grows per session; feeds caption-back) ─
