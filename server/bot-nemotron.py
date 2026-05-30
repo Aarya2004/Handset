@@ -27,7 +27,12 @@ from dotenv import load_dotenv
 from loguru import logger
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import EndTaskFrame, FunctionCallResultProperties, LLMRunFrame
+from pipecat.frames.frames import (
+    EndTaskFrame,
+    FunctionCallResultProperties,
+    InputImageRawFrame,
+    LLMRunFrame,
+)
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -35,7 +40,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
     LLMUserAggregatorParams,
 )
-from pipecat.processors.frame_processor import FrameDirection
+from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.runner.types import (
     RunnerArguments,
     SmallWebRTCRunnerArguments,
@@ -57,6 +62,40 @@ from nemotron_llm import VLLMOpenAILLMService
 from nvidia_stt import NVidiaWebSocketSTTService
 
 load_dotenv(override=True)
+
+
+class VideoFrameProbe(FrameProcessor):
+    """Diagnostic processor that logs incoming camera video frames.
+
+    Used to verify that video input is actually flowing through the pipeline
+    before any ASL recognition is wired up. Logs the first frame immediately,
+    then a heartbeat roughly once per second so the console isn't flooded.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self._count = 0
+        self._logged_first = False
+
+    async def process_frame(self, frame, direction):
+        await super().process_frame(frame, direction)
+
+        if isinstance(frame, InputImageRawFrame):
+            self._count += 1
+            if not self._logged_first:
+                logger.info(
+                    f"📹 First video frame received: size={frame.size} "
+                    f"format={frame.format}"
+                )
+                self._logged_first = True
+            elif self._count % 30 == 0:
+                logger.info(
+                    f"📹 Video frames flowing: {self._count} received "
+                    f"(latest size={frame.size})"
+                )
+
+        # Pass every frame through untouched.
+        await self.push_frame(frame, direction)
 
 
 async def get_call_info(call_sid: str) -> dict:
@@ -414,6 +453,7 @@ async def run_bot(
     pipeline = Pipeline(
         [
             transport.input(),
+            VideoFrameProbe(),  # logs incoming camera frames (diagnostic)
             stt,
             user_aggregator,
             llm,
@@ -480,6 +520,10 @@ async def bot(runner_args: RunnerArguments):
                     audio_in_enabled=True,
                     audio_in_filter=krisp_filter,
                     audio_out_enabled=True,
+                    # Enable camera video input (browser/WebRTC only). Used as the
+                    # first step toward ASL recognition; for now frames are only
+                    # observed by VideoFrameProbe in the pipeline.
+                    video_in_enabled=True,
                 ),
             )
         case WebSocketRunnerArguments():
