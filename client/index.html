@@ -604,7 +604,9 @@
           };
           bridge.onmessage = (e) => {
             const m = JSON.parse(e.data);
-            if (m.type === "caption") pushCaption("them", m.text); // hearing party reply
+            if (m.type === "caption")
+              pushCaption("them", m.text); // hearing party reply
+            else if (m.type === "spoken") pushCaption("you", m.text); // conduct result (agent's sentence)
           };
         } catch (e) {}
       }
@@ -618,6 +620,17 @@
           );
         console.log("[BRIDGE] sign ->", token, "|", text);
       }
+      // the AGENT path: send raw signed intent -> Nemotron expands it -> spoken.
+      // The agent's actual sentence comes back via the "spoken" echo.
+      function conductIntent(intent) {
+        fireWave();
+        if (bridge && bridge.readyState === 1)
+          bridge.send(
+            JSON.stringify({ type: "sign", token: intent, mode: "conduct" }),
+          );
+        console.log("[BRIDGE] conduct ->", intent);
+      }
+      window.conductIntent = conductIntent;
       // canonical phrases for the demo vocab (verbatim hero path, no LLM)
       const PHRASE = {
         HELLO: "Hi there.",
@@ -880,6 +893,10 @@
             "them",
             prompt("Aarya says:") || "Sure — what day works?",
           );
+        }
+        if (e.key === "x") {
+          // demo: the AGENT path — raw noisy signs -> Nemotron -> natural sentence
+          conductIntent("APPOINTMENT, T,H,U,R,Z,D,A,Y");
         }
       });
       function setCall(on) {

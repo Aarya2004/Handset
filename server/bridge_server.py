@@ -16,6 +16,7 @@ import asyncio
 import json
 import subprocess
 
+import httpx
 import uvicorn
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 
@@ -57,6 +58,40 @@ def speak(text: str):
     subprocess.Popen(["say", "-r", "184", text])
 
 
+# --- the AGENT path: Nemotron turns noisy sign tokens into a real sentence -----
+NEMOTRON_URL = "http://nemotron-fleet-alb-1322439314.us-west-2.elb.amazonaws.com/v1/chat/completions"
+CONDUCT_SYSTEM = (
+    "You convert a Deaf caller's recognized ASL sign tokens into ONE short, natural, "
+    "polite sentence spoken aloud to a receptionist. Fingerspelled letters may have "
+    "errors; fix them from context. Reply with ONLY the sentence. "
+    "Example: Tokens: HELLO, REFILL, M,E,D -> Hi, I'd like to refill my medication."
+)
+
+
+async def conduct(intent: str) -> str:
+    """This is what makes us an AGENT, not a dumb relay: Nemotron expands +
+    error-corrects the signed intent into natural speech. Verified on the live
+    endpoint (Z,O,L,O,F,T -> 'I'd like to refill my Zoloft.')."""
+    payload = {
+        "model": "nvidia/nemotron-3-super",
+        "messages": [
+            {"role": "system", "content": CONDUCT_SYSTEM},
+            {"role": "user", "content": f"Tokens: {intent}"},
+        ],
+        "max_tokens": 64,
+        "temperature": 0.3,
+        "chat_template_kwargs": {"enable_thinking": False},  # mandatory for voice
+    }
+    try:
+        async with httpx.AsyncClient(timeout=15) as c:
+            r = await c.post(NEMOTRON_URL, json=payload)
+            txt = (r.json()["choices"][0]["message"].get("content") or "").strip()
+            return txt or intent
+    except Exception as e:
+        print(f"[conduct] Nemotron failed, falling back to raw intent: {e}")
+        return intent
+
+
 @app.websocket("/signal")
 async def signal(ws: WebSocket):
     await ws.accept()
@@ -67,10 +102,15 @@ async def signal(ws: WebSocket):
             msg = json.loads(await ws.receive_text())
             kind = msg.get("type")
             if kind == "sign":
-                token = (msg.get("token") or "").upper()
-                text = msg.get("text") or PHRASE.get(token, token.lower())
-                speak(text)
-                await broadcast({"type": "spoken", "text": text})
+                mode = msg.get("mode", "verbatim")
+                raw = msg.get("token") or ""
+                if mode == "conduct":
+                    text = await conduct(raw or msg.get("text") or "")
+                    speak(text)
+                    await broadcast({"type": "spoken", "text": text})  # conduct: echo the result
+                else:
+                    text = msg.get("text") or PHRASE.get(raw.upper(), raw.lower())
+                    speak(text)  # verbatim: client already shows it optimistically
             elif kind == "hearing":
                 # test hook: inject what the hearing party said -> caption
                 await broadcast({"type": "caption", "speaker": "aarya", "text": msg.get("text", "")})
