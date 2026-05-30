@@ -53,9 +53,12 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from twilio.rest import Client as TwilioClient
 
+from pipecat.audio.vad.silero import SileroVADAnalyzer
+from pipecat.audio.vad.vad_analyzer import VADParams
 from pipecat.frames.frames import TranscriptionFrame, TTSSpeakFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
+from pipecat.processors.audio.vad_processor import VADProcessor
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.runner.utils import parse_telephony_websocket
 from pipecat.serializers.twilio import TwilioFrameSerializer
@@ -287,14 +290,29 @@ async def twilio_media(ws: WebSocket):
     stt = NVidiaWebSocketSTTService(
         url=os.getenv("NVIDIA_ASR_URL", "ws://localhost:8080"),
         sample_rate=16000,  # Parakeet requires 16k; Pipecat resamples from Twilio's 8k
+        # This deployment runs continuous Nemotron mode emitting CUMULATIVE
+        # interims — strip the already-finalized prefix or we only capture the
+        # last delta ("L." instead of "hello"). Per nvidia_stt.py docstring.
+        strip_interim_prefix=True,
     )
     caption_emitter = CaptionEmitter()
 
-    # Pipeline: inbound phone audio -> STT -> caption-back; and TTSSpeakFrame
-    # injections -> Gradium TTS -> outbound phone audio. No LLM here (no
-    # double-speak): conduct happens before we queue the TTSSpeakFrame.
+    # VAD is REQUIRED: the Nemotron STT finalizes a transcript on
+    # VADUserStoppedSpeakingFrame. Without it, audio reaches the STT but no
+    # TranscriptionFrame is ever emitted (the caption-back silence bug).
+    # stop_secs=0.8 (vs default 0.2): the default finalizes on inter-word pauses,
+    # fragmenting a sentence into "Hello." + "I I don't" + ... — a longer
+    # end-of-speech window lets the full utterance complete before finalizing.
+    vad = VADProcessor(
+        vad_analyzer=SileroVADAnalyzer(params=VADParams(stop_secs=0.8))
+    )
+
+    # Pipeline: inbound phone audio -> VAD -> STT -> caption-back; and
+    # TTSSpeakFrame injections -> Gradium TTS -> outbound phone audio. No LLM
+    # here (no double-speak): conduct happens before we queue the TTSSpeakFrame.
     pipeline = Pipeline([
         transport.input(),
+        vad,
         stt,
         caption_emitter,
         tts,
@@ -304,8 +322,10 @@ async def twilio_media(ws: WebSocket):
     worker = PipelineWorker(
         pipeline,
         params=PipelineParams(
-            # Twilio uses 8 kHz mu-law in both directions.
-            audio_in_sample_rate=8000,
+            # Twilio wire format is 8 kHz mu-law (handled by TwilioFrameSerializer),
+            # but Parakeet ASR needs 16 kHz — so the pipeline upsamples inbound to
+            # 16k before the STT. Output stays 8k for Twilio.
+            audio_in_sample_rate=16000,
             audio_out_sample_rate=8000,
         ),
         # Disable idle timeout — keep the pipeline alive while waiting for
