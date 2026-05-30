@@ -79,10 +79,55 @@
       <input id="lbl" placeholder="label e.g. HELLO" />
       <button id="teach">teach sign</button>
       <button id="conduct">conduct: APPOINTMENT,T,H,U,R,Z,D,A,Y</button>
+      <button id="export">⬇ export library → default_profile.json</button>
     </div>
     <div class="row hud">
       <span id="status">bridge: ?</span> · <span id="lat">recog: – ms</span> ·
       <span id="prof">profile: {}</span>
+    </div>
+    <div
+      id="live"
+      style="
+        margin: 10px 0;
+        padding: 12px;
+        border: 1px solid #243;
+        border-radius: 10px;
+        background: #0b1220;
+        max-width: 560px;
+      "
+    >
+      <div style="font-size: 13px; color: #8a94a6">live word (every frame)</div>
+      <div
+        id="liveWord"
+        style="
+          font-size: 34px;
+          font-weight: 700;
+          color: #3df5c5;
+          min-height: 42px;
+        "
+      >
+        —
+      </div>
+      <div style="font-size: 13px; color: #8a94a6; margin-top: 8px">
+        buffering — signs this sentence
+      </div>
+      <div id="buf" style="font-size: 20px; color: #fff; min-height: 26px">
+        —
+      </div>
+      <div style="font-size: 13px; color: #8a94a6; margin-top: 8px">
+        🗣 spoken sentence (Nemotron, on pause)
+      </div>
+      <div
+        id="say"
+        style="
+          font-size: 22px;
+          font-weight: 600;
+          color: #ffd166;
+          min-height: 28px;
+        "
+      >
+        —
+      </div>
     </div>
     <div id="log"></div>
     <video id="v" autoplay playsinline muted></video>
@@ -148,6 +193,14 @@
           },
           reading: (t, c) => {
             document.title = t ? `${t} ${c.toFixed(2)}` : "…";
+            document.getElementById("liveWord").textContent = t || "—";
+          },
+          word: (t, buf) => {
+            document.getElementById("buf").textContent = buf.join(", ");
+          },
+          sentence: (intent) => {
+            document.getElementById("say").textContent =
+              "forming: " + intent + " …";
           },
           sign: (t, c, ms) => {
             log(
@@ -164,7 +217,10 @@
             log(`📚 LEARNED: ${l}  (vocabulary now ${n})`);
             setProf();
           },
-          spoken: (t) => log(`🗣  AGENT SPOKE: "${t}"`),
+          spoken: (t) => {
+            log(`🗣  AGENT SPOKE: "${t}"`);
+            document.getElementById("say").textContent = t;
+          },
           caption: (t) => log(`💬 HEARING: "${t}"`),
           bridge: (up) => {
             document.getElementById("status").textContent =
@@ -188,6 +244,19 @@
         log("conduct → sending raw signs to Nemotron…");
         rec.conductIntent("APPOINTMENT, T,H,U,R,Z,D,A,Y");
       };
+      document.getElementById("export").onclick = () => {
+        const data = JSON.stringify(rec.exportProfile());
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(
+          new Blob([data], { type: "application/json" }),
+        );
+        a.download = "default_profile.json";
+        a.click();
+        log(
+          `⬇ exported ${Object.keys(rec.getProfile()).length} signs → default_profile.json (drop it in client/ to ship as the base library)`,
+        );
+      };
+      window.rec = rec; // console: rec.exportProfile(), rec.importProfile(obj)
       rec.start().catch((e) => log("start failed: " + e.message));
     </script>
   </body>
