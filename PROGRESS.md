@@ -75,19 +75,41 @@ These are the gaps. See live grilling below — answers get folded back here.
 
 ---
 
+## 🎯 LOCKED SCOPE (Rule 2)
+
+**IRREDUCIBLE MVP (perfect & test this FIRST, before adding ANYTHING):**
+> **Arav signs → bot recognizes → bot SPEAKS the flower order on a real phone call to Aarya. ONE direction.**
+
+Perfected, fool-proof across all demo conditions (Rule 3), proven working (Rule 1). This single flow IS the WOW.
+
+**POST-MVP (layer on ONLY after core is bulletproof, in order):**
+1. **Improvement beat (HEADLINE): Cekura-measured latency tuning.** Tune Nemotron `enable_thinking`/sampling for phone responsiveness → prove before→after latency drop with Cekura. Hits BOTH judging signals; uniquely justified by "it's a live phone call." (Accuracy loop = secondary beat if time.)
+2. Caption-back to Arav's screen (D9) → makes it two-way.
+3. Second Cekura surface (recognizer accuracy, D10-S2).
+4. Outbound Twilio (D7) — inbound is the safety net.
+
+> Caption-back (D9), two-surface eval, outbound — all explicitly **deferred** past the one-way core. Not fluff, just *later*.
+
 ## THE PLAN (synthesized — build order)
 
-**Guaranteed-demoable milestone first, recognizer is the last swappable piece.**
+**ONE-WAY MVP only. Each step is PROVEN working (Rule 1) before the next. Recognizer is the last swappable piece.**
 
-1. **Text back door (D11)** — bot accepts a POSTed/typed "user turn" as if from the recognizer. *Unblocks everything; lets us test the whole loop without signing.*
-2. **Conversation loop (local)** — Nemotron Super + flower-shop tools driven by back-door text → Gradium TTS. Already mostly exists in `bot-nemotron.py`.
-3. **Caption-back (D9)** — Nemotron ASR on the hearing side → text to Arav's screen.
-4. **Camera client (D6)** — browser page: webcam + Send button → records clip → POST to `/sign`.
-5. **Recognizer stage (D12)** — `frames → text`, tiered: Omni or curated clips.
-6. **Twilio phone leg (D7, D8)** — deploy to Pipecat Cloud, wire inbound (safety) then outbound (preferred). Done near the end.
-7. **Cekura evals (D10)** — Surface 1 (conversation via back door) + Surface 2 (recognizer accuracy offline).
+Every step ends with "✅ PROVE:" — the concrete test that must pass before moving on.
 
-**Parallel tracks (D13):** Claude → steps 1–5 locally. Aarya/Arav → step 6 (Twilio/deploy) + chase Omni (O1). Merge on the `frames→text` contract.
+1. **Text back door (D11)** — bot accepts a POSTed/typed "user turn" as if from the recognizer.
+   ✅ PROVE: POST `"I want a dozen red roses delivered tomorrow"` → bot speaks a correct flower-shop response locally.
+2. **Conversation loop solid (local)** — Nemotron Super + flower-shop tools (catalog, order) driven by back-door text → Gradium TTS. (Mostly exists in `bot-nemotron.py`.)
+   ✅ PROVE: a full typed-turn order completes correctly (right bouquet, delivery captured, order placed) — re-run after step 1 still works.
+3. **Camera client (D6)** — browser page: webcam preview + **Send** button → records clip between presses → POST to `/sign`.
+   ✅ PROVE: pressing Send POSTs a real clip; server logs receipt with frame count. (Old: back-door text still works.)
+4. **Recognizer stage (D12)** — pluggable `frames → text`, tiered: **Omni** (if O1) else **curated clips**. Wire its output into the SAME path the back door feeds.
+   ✅ PROVE: a known signed clip → correct text → bot speaks correct order. (Old: typed back door + camera POST still work.)
+5. **Real Twilio phone leg (D7, D8)** — deploy to Pipecat Cloud, wire **inbound first** (safety net), then outbound. The spoken order comes out of Aarya's actual phone.
+   ✅ PROVE: Aarya on a real phone hears Arav's signed order spoken. (Old: full local loop still works.)
+
+→ **At this point the IRREDUCIBLE MVP is done and proven.** Only now: latency-tuning improvement beat, then caption-back, then 2nd eval surface, then outbound polish.
+
+**Parallel tracks (D13):** Claude → steps 1–4 locally. Aarya/Arav → step 5 (Twilio/deploy) + chase Omni (O1). Merge on the `frames→text` contract.
 
 ### ⚠️ STILL UNVALIDATED (don't forget)
 - **O1 Omni endpoint** — the whole "easy recognizer" bet. 30-min experiment, may fail → curated-clip fallback.
@@ -97,6 +119,26 @@ These are the gaps. See live grilling below — answers get folded back here.
 - **Latency** (G3) — sign→clip→Omni→Nemotron(thinking)→TTS→phone could be several seconds; acceptable? Measure once wired.
 
 ---
+
+## 🛑 BUILD RULES (binding — Aarya, Arav, Claude all hold to these)
+
+1. **TEST & PROVE AS WE BUILD.** Never just keep building. Loop: build → prove it works → prove OLD features still work → only THEN add the next thing. Every increment is demonstrated working before moving on.
+2. **NO FLUFF, ONLY MVP.** Strip to the genuine MVP. A working *WOW* MVP that does the perfect amount, perfected and constantly tested (Rule 1), BEFORE adding anything new.
+3. **UI/UX & DEMO IS KEY.** Must be demo-ready and fool-proof across ALL showcase conditions — judges want to see it genuinely working in every scenario and actually usable. The exact function must be *perfected*.
+4. **MINDBLOWING + SIMPLE.** Doesn't need to do everything — but the one thing it does must be 100x better than what exists, or genuinely revolutionary / one-of-a-kind.
+5. **USE & MAXIMIZE THE SPONSORS.** Deep-research sponsor capabilities, then actually manipulate/customize/build on them (weights, model config, custom metrics, etc.) — show we GENUINELY improved & personalized what was given.
+6. **DO NOT GUESS.** Anything unclear / needing direction → ASK + deep-research sponsors/capabilities/stats BEFORE acting. Don't make product decisions unilaterally unless pre-authorized.
+7. **HYPERFOCUS ON HACKATHON CRITERIA.** No random work. Fixate on excelling at what the judges reward (below).
+
+## 🎯 HACKATHON WINNING CRITERIA (from starter README, line 30 — verbatim signals)
+- **"great examples of using Cekura to IMPROVE voice agent performance"** → not run-once. Show **measure → fix → re-measure** (Cekura supports regression / side-by-side run comparison / custom metrics / 10k+ red-team scenarios). **A demo beat: before→after score improvement.**
+- **"using open source models from NVIDIA"** → use Nemotron prominently. **Omni (open-weight, video) is MORE on-criteria than text Super** AND solves our recognizer. Double win.
+- **"creativity / technically interesting / solves a real problem"** → ASL→phone accessibility hits "real problem" hard.
+
+### Sponsor levers we can MAXIMIZE (Rule 5) — researched, not guessed
+- **Nemotron `enable_thinking` toggle + sampling (temp/top_p/reasoning_budget).** Thinking ON ≈ +2.2s TTFB (measured in `nemotron_llm.py`!). For a LIVE PHONE CALL, latency is king → tune thinking per turn, **prove the latency win via Cekura latency metrics.** = "improved what was given" measured by Cekura. (Sources: vLLM Nemotron-3-Super cookbook, HF model card.)
+- **Cekura custom metrics + regression + red-team** → our two-surface eval (D10) + a before/after improvement beat.
+- **Nemotron Omni is open-weight on HF** (`nvidia/Nemotron-3-Nano-Omni-30B-A3B-Reasoning`) — video-capable. Chase the hosted endpoint (O1).
 
 ## How we collaborate
 - Aarya + Arav. Keep this file as the single source of truth. Claude updates it as decisions land.
