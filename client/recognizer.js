@@ -40,8 +40,10 @@ const CAP_FRAMES = 5; // frames captured per enrollment
 const MOTION_VEL = 0.04; // above this avg landmark velocity => dynamic sign candidate
 const MOTION_MIN_MS = 240;
 const MOTION_SETTLE_MS = 260;
-const MOTION_FRAME_GAP = 180;
-const MOTION_MAX_FRAMES = 6; // more frames across the movement = better temporal signal for the VLM (server MAX_IMAGES bumped to match)
+const MOTION_FRAME_GAP = 42; // ~24fps dense capture (was 180ms/~5.5fps — too sparse, missed fast movement)
+const MOTION_BUFFER_MAX = 48; // ~2s of dense frames buffered during the gesture
+const MOTION_SEND_FRAMES = 6; // we CHUNK the dense buffer down to this many EVENLY-SPACED keyframes (whole-gesture coverage) before sending to the VLM
+const MOTION_MAX_FRAMES = MOTION_SEND_FRAMES; // kept for compatibility
 const MOTION_COOLDOWN = 2800;
 const MOTION_TIMEOUT_MS = 8000; // VLM round-trip is ~2-3s (non-reasoning VL); 2.2s aborted every real call -> "motion reader unavailable"
 const MOTION_MIN_CONF = 0.55;
@@ -267,12 +269,24 @@ export function createRecognizer({
     return canvas.toDataURL("image/jpeg", 0.72);
   }
   function addMotionFrame(now) {
-    if (now - motion.lastFrameAt < MOTION_FRAME_GAP) return;
+    if (now - motion.lastFrameAt < MOTION_FRAME_GAP) return; // ~24fps
     const frame = captureFrame();
     if (!frame) return;
     motion.frames.push(frame);
-    if (motion.frames.length > MOTION_MAX_FRAMES) motion.frames.shift();
+    // keep a long dense buffer (the WHOLE gesture); only drop if absurdly long
+    if (motion.frames.length > MOTION_BUFFER_MAX) motion.frames.shift();
     motion.lastFrameAt = now;
+  }
+  // CHUNK a dense frame buffer down to n evenly-spaced keyframes spanning the
+  // whole gesture (always includes first + last). Gives the VLM even temporal
+  // coverage of the full movement instead of a cluster from one part of it.
+  function chunkFrames(frames, n) {
+    if (frames.length <= n) return frames;
+    const out = [];
+    for (let i = 0; i < n; i++) {
+      out.push(frames[Math.round((i * (frames.length - 1)) / (n - 1))]);
+    }
+    return out;
   }
   async function postMotionFrames(frames) {
     const controller = new AbortController();
@@ -339,7 +353,9 @@ export function createRecognizer({
       }
     }
     if (duration >= MOTION_MIN_MS && frames.length >= 2) {
-      void classifyMotion(frames);
+      // chunk the dense ~24fps buffer down to evenly-spaced keyframes spanning
+      // the whole gesture before sending to the VLM
+      void classifyMotion(chunkFrames(frames, MOTION_SEND_FRAMES));
     } else {
       emit("motion", "aborted", {}); // too short / too few frames — clear the "reading…" UI
     }
@@ -558,15 +574,17 @@ export function createRecognizer({
     },
     // manual fallback/debug trigger; normal motion signs are detected automatically.
     async readMotionSign() {
+      // dense ~24fps capture over a ~1.2s window, then chunk to keyframes — same
+      // as the automatic path, so the manual button covers a real gesture.
       const frames = [];
-      for (let i = 0; i < MOTION_MAX_FRAMES; i++) {
+      const WINDOW_MS = 1200;
+      const t0 = performance.now();
+      while (performance.now() - t0 < WINDOW_MS && frames.length < MOTION_BUFFER_MAX) {
         const frame = captureFrame();
         if (frame) frames.push(frame);
-        if (i < MOTION_MAX_FRAMES - 1) {
-          await new Promise((resolve) => setTimeout(resolve, MOTION_FRAME_GAP));
-        }
+        await new Promise((resolve) => setTimeout(resolve, MOTION_FRAME_GAP));
       }
-      await classifyMotion(frames);
+      await classifyMotion(chunkFrames(frames, MOTION_SEND_FRAMES));
     },
     // force the buffered signs to commit NOW (e.g. user taps "send") instead of waiting for the pause
     commitNow() {
