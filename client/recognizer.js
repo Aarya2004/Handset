@@ -28,10 +28,10 @@ import {
 
 const HOLD_VEL = 0.03; // below this avg landmark velocity => "held" (raised from 0.018: tolerate natural hand tremor so commits aren't 1s+)
 const HOLD_FRAMES = 2; // consecutive held frames before commit (~66ms — fire the moment a confident sign is shown)
-const ACCEPT = 0.85,
-  ASK = 0.55; // confidence gates
-const TAU = 0.55; // distance scale for confidence
-const COOLDOWN = 1200; // ms between same-token emissions
+const ACCEPT = 0.7,
+  ASK = 0.45; // confidence gates (loosened so natural signing variation commits fast, not after 4s)
+const TAU = 1.2; // distance scale for confidence (raised from 0.55: typical sign distances now map to high confidence)
+const COOLDOWN = 700; // ms between same-token emissions (lowered for a more live/continuous feel)
 const CAP_FRAMES = 5; // frames captured per enrollment
 
 const WASM =
