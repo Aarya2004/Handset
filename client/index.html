@@ -1,0 +1,978 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SIGNAL ROOM</title>
+    <style>
+      :root {
+        --bg: #0a0c10;
+        --panel: #12151c;
+        --hair: #1e2430;
+        --cyan: #3df5c5;
+        --amber: #f5b23d;
+        --text: #e8edf2;
+        --muted: #8a94a6;
+        --err: #ff5c5c;
+        --mono: "Geist Mono", ui-monospace, "JetBrains Mono", monospace;
+        --disp: "Space Grotesk", "Geist", -apple-system, system-ui, sans-serif;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: var(--bg);
+        color: var(--text);
+        font-family: var(--disp);
+        overflow: hidden;
+      }
+      .app {
+        display: grid;
+        grid-template-rows: 48px 1fr 150px;
+        height: 100vh;
+        gap: 1px;
+        background: var(--hair);
+      }
+      /* top bar */
+      .top {
+        background: var(--bg);
+        display: flex;
+        align-items: center;
+        gap: 20px;
+        padding: 0 18px;
+        font-family: var(--mono);
+        font-size: 13px;
+        letter-spacing: 0.04em;
+      }
+      .brand {
+        color: var(--cyan);
+        font-weight: 700;
+        letter-spacing: 0.18em;
+      }
+      .top .sp {
+        flex: 1;
+      }
+      .pill {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        color: var(--muted);
+      }
+      .dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--muted);
+      }
+      .dot.live {
+        background: var(--err);
+        box-shadow: 0 0 10px var(--err);
+        animation: pulse 1.4s infinite;
+      }
+      @keyframes pulse {
+        0%,
+        100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.35;
+        }
+      }
+      .hud {
+        color: var(--cyan);
+      }
+      .hud b {
+        font-weight: 700;
+      }
+      .hud2 {
+        color: var(--amber);
+        opacity: 0.85;
+      }
+      .wave {
+        display: flex;
+        align-items: flex-end;
+        gap: 2px;
+        height: 18px;
+        width: 54px;
+      }
+      .wave i {
+        flex: 1;
+        background: var(--cyan);
+        height: 10%;
+        border-radius: 1px;
+        transition: height 0.06s linear;
+        opacity: 0.85;
+      }
+      /* main */
+      .main {
+        display: grid;
+        grid-template-columns: 1fr 320px;
+        gap: 1px;
+        background: var(--hair);
+        min-height: 0;
+      }
+      .stage {
+        background: var(--bg);
+        position: relative;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        overflow: hidden;
+      }
+      #video {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        opacity: 0;
+        pointer-events: none;
+      }
+      #overlay {
+        max-width: 100%;
+        max-height: 100%;
+        transform: scaleX(-1);
+        background: #06080b;
+        border: 1px solid var(--hair);
+        border-radius: 10px;
+      }
+      .stage.hot #overlay {
+        box-shadow:
+          0 0 0 1px var(--cyan),
+          0 0 26px rgba(61, 245, 197, 0.25);
+      }
+      .reading {
+        position: absolute;
+        left: 24px;
+        bottom: 20px;
+        font-family: var(--mono);
+        font-size: 13px;
+        color: var(--muted);
+      }
+      .reading .tok {
+        color: var(--cyan);
+        font-size: 26px;
+        font-weight: 700;
+        font-family: var(--disp);
+        letter-spacing: 0.02em;
+      }
+      .conf {
+        display: inline-block;
+        margin-left: 10px;
+        color: var(--muted);
+      }
+      .gate {
+        position: absolute;
+        left: 24px;
+        bottom: 78px;
+        display: flex;
+        gap: 8px;
+      }
+      .gate button {
+        font-family: var(--mono);
+        font-size: 13px;
+        background: #0e1f1b;
+        border: 1px solid var(--cyan);
+        color: var(--cyan);
+        padding: 8px 12px;
+        border-radius: 8px;
+        cursor: pointer;
+      }
+      .gate button:hover {
+        background: #123029;
+      }
+      /* profile panel */
+      .panel {
+        background: var(--panel);
+        padding: 16px;
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+      }
+      .panel h3 {
+        font-family: var(--mono);
+        font-size: 12px;
+        letter-spacing: 0.12em;
+        color: var(--muted);
+        margin: 0 0 12px;
+        text-transform: uppercase;
+        display: flex;
+        justify-content: space-between;
+      }
+      .panel h3 span {
+        color: var(--cyan);
+      }
+      .chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        overflow: auto;
+        align-content: flex-start;
+        flex: 1;
+      }
+      .chip {
+        font-family: var(--mono);
+        font-size: 13px;
+        background: #0d1a17;
+        border: 1px solid #214a40;
+        color: var(--text);
+        padding: 7px 11px;
+        border-radius: 999px;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        animation: chipin 0.5s cubic-bezier(0.2, 0.8, 0.2, 1);
+      }
+      .chip .c {
+        color: var(--cyan);
+      }
+      .chip.flash {
+        animation: flash 0.6s ease;
+      }
+      @keyframes chipin {
+        from {
+          opacity: 0;
+          transform: scale(0.85) translateY(6px);
+        }
+        to {
+          opacity: 1;
+          transform: none;
+        }
+      }
+      @keyframes flash {
+        0%,
+        100% {
+          box-shadow: none;
+        }
+        40% {
+          box-shadow:
+            0 0 0 2px var(--cyan),
+            0 0 18px rgba(61, 245, 197, 0.5);
+        }
+      }
+      .teach {
+        margin-top: 12px;
+        font-family: var(--mono);
+        font-size: 13px;
+        background: transparent;
+        border: 1px dashed #2a3a45;
+        color: var(--muted);
+        padding: 12px;
+        border-radius: 8px;
+        cursor: pointer;
+        text-align: center;
+      }
+      .teach:hover {
+        border-color: var(--cyan);
+        color: var(--cyan);
+      }
+      .spark {
+        height: 34px;
+        margin-top: 12px;
+        border-top: 1px solid var(--hair);
+        padding-top: 8px;
+        color: var(--muted);
+        font-family: var(--mono);
+        font-size: 11px;
+      }
+      /* captions */
+      .caps {
+        background: var(--bg);
+        padding: 14px 22px;
+        display: flex;
+        flex-direction: column;
+        justify-content: flex-end;
+        gap: 8px;
+        overflow: hidden;
+      }
+      .cap {
+        font-size: 34px;
+        font-weight: 600;
+        letter-spacing: -0.02em;
+        line-height: 1.1;
+        opacity: 1;
+        transition: opacity 0.4s;
+        display: flex;
+        gap: 14px;
+        align-items: baseline;
+        animation: slideup 0.4s cubic-bezier(0.2, 0.8, 0.2, 1);
+      }
+      .cap .who {
+        font-family: var(--mono);
+        font-size: 13px;
+        font-weight: 700;
+        letter-spacing: 0.1em;
+        opacity: 0.9;
+        min-width: 74px;
+      }
+      .cap.you .who {
+        color: var(--cyan);
+      }
+      .cap.you {
+        color: var(--cyan);
+      }
+      .cap.them .who {
+        color: var(--amber);
+      }
+      .cap.them {
+        color: var(--amber);
+      }
+      .cap.old {
+        opacity: 0.32;
+      }
+      @keyframes slideup {
+        from {
+          opacity: 0;
+          transform: translateY(16px);
+        }
+        to {
+          opacity: 1;
+          transform: none;
+        }
+      }
+      /* toast + modal */
+      .toast {
+        position: fixed;
+        top: 62px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: #0e1f1b;
+        border: 1px solid var(--cyan);
+        color: var(--cyan);
+        font-family: var(--mono);
+        font-size: 14px;
+        padding: 12px 18px;
+        border-radius: 10px;
+        opacity: 0;
+        transition:
+          opacity 0.3s,
+          transform 0.3s;
+        pointer-events: none;
+        z-index: 30;
+      }
+      .toast.show {
+        opacity: 1;
+        transform: translateX(-50%) translateY(4px);
+      }
+      .modal {
+        position: fixed;
+        inset: 0;
+        background: rgba(4, 6, 10, 0.82);
+        display: none;
+        align-items: center;
+        justify-content: center;
+        z-index: 40;
+      }
+      .modal.show {
+        display: flex;
+      }
+      .card {
+        background: var(--panel);
+        border: 1px solid var(--hair);
+        border-radius: 14px;
+        padding: 26px;
+        width: 380px;
+        text-align: center;
+      }
+      .card h2 {
+        font-family: var(--mono);
+        font-size: 14px;
+        letter-spacing: 0.1em;
+        color: var(--cyan);
+        margin: 0 0 6px;
+      }
+      .card p {
+        color: var(--muted);
+        font-size: 14px;
+        margin: 0 0 18px;
+      }
+      .card input {
+        width: 100%;
+        background: var(--bg);
+        border: 1px solid var(--hair);
+        color: var(--text);
+        font-family: var(--mono);
+        font-size: 16px;
+        padding: 10px 12px;
+        border-radius: 8px;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+      }
+      .card .cnt {
+        font-family: var(--mono);
+        font-size: 42px;
+        color: var(--cyan);
+        margin: 14px 0;
+      }
+      .card .row {
+        display: flex;
+        gap: 10px;
+        margin-top: 18px;
+      }
+      .card button {
+        flex: 1;
+        font-family: var(--mono);
+        font-size: 14px;
+        padding: 11px;
+        border-radius: 8px;
+        cursor: pointer;
+        border: 1px solid var(--hair);
+        background: #0e1116;
+        color: var(--text);
+      }
+      .card button.go {
+        border-color: var(--cyan);
+        background: #0e1f1b;
+        color: var(--cyan);
+      }
+      .loading {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: var(--bg);
+        font-family: var(--mono);
+        color: var(--muted);
+        z-index: 50;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="loading" id="loading">loading vision model…</div>
+
+    <div class="app">
+      <div class="top">
+        <span class="brand">◖ SIGNAL ROOM</span>
+        <span class="pill"
+          ><span class="dot" id="calldot"></span
+          ><span id="callstate">NO CALL</span></span
+        >
+        <span class="sp"></span>
+        <span class="hud">RECOG <b id="recms">—</b> ms</span>
+        <span class="hud2"
+          >SPOKEN <span id="spokenms">~0.9</span> s
+          <i style="opacity: 0.6">(incl. phone net)</i></span
+        >
+        <span class="wave" id="wave"
+          ><i></i><i></i><i></i><i></i><i></i><i></i
+        ></span>
+      </div>
+
+      <div class="main">
+        <div class="stage" id="stage">
+          <video id="video" autoplay playsinline muted></video>
+          <canvas id="overlay" width="960" height="720"></canvas>
+          <div class="gate" id="gate"></div>
+          <div class="reading"><span id="reading">show your hand…</span></div>
+        </div>
+        <div class="panel">
+          <h3>SIGN PROFILE <span id="count">0 signs</span></h3>
+          <div class="chips" id="chips"></div>
+          <div class="teach" id="teachBtn">+ TEACH A SIGN</div>
+          <div class="spark" id="spark">
+            recognition: personal k-NN · on-device · no cloud
+          </div>
+        </div>
+      </div>
+
+      <div class="caps" id="caps"></div>
+    </div>
+
+    <div class="toast" id="toast"></div>
+    <div class="modal" id="modal">
+      <div class="card">
+        <h2 id="mTitle">TEACH A SIGN</h2>
+        <p id="mDesc">
+          Type a word, then hold the sign steady. We capture 5 frames.
+        </p>
+        <input id="mInput" placeholder="e.g. WATER" autocomplete="off" />
+        <div class="cnt" id="mCount" style="display: none">0 / 5</div>
+        <div class="row">
+          <button id="mCancel">CANCEL</button>
+          <button class="go" id="mStart">START CAPTURE</button>
+        </div>
+      </div>
+    </div>
+
+    <script type="module">
+      import {
+        HandLandmarker,
+        FilesetResolver,
+      } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs";
+
+      // ---------- tunables ----------
+      const HOLD_VEL = 0.018; // below this avg landmark velocity => "held"
+      const HOLD_FRAMES = 5; // consecutive held frames before commit
+      const ACCEPT = 0.85,
+        ASK = 0.55; // confidence gates
+      const TAU = 0.55; // distance scale for confidence
+      const COOLDOWN = 1200; // ms between same-token emissions
+      const CAP_FRAMES = 5; // frames captured per enrollment
+
+      // ---------- state ----------
+      let landmarker,
+        video,
+        overlay,
+        ctx,
+        lastVideoTime = -1;
+      let recentVecs = []; // rolling normalized vectors
+      let heldCount = 0,
+        heldStartT = 0;
+      let lastEmit = { token: null, t: 0 };
+      let profile = loadProfile(); // { label: [vec,vec,...] }
+      let enroll = null; // {label, frames:[]}
+
+      const $ = (id) => document.getElementById(id);
+
+      // ---------- landmark normalization (translate to wrist, scale by wrist->mid-MCP) ----------
+      function normalize(lm) {
+        const wrist = lm[0],
+          midMcp = lm[9];
+        const sx = midMcp.x - wrist.x,
+          sy = midMcp.y - wrist.y,
+          sz = (midMcp.z || 0) - (wrist.z || 0);
+        let scale = Math.hypot(sx, sy, sz) || 1e-6;
+        const v = new Float32Array(63);
+        for (let i = 0; i < 21; i++) {
+          v[i * 3] = (lm[i].x - wrist.x) / scale;
+          v[i * 3 + 1] = (lm[i].y - wrist.y) / scale;
+          v[i * 3 + 2] = ((lm[i].z || 0) - (wrist.z || 0)) / scale;
+        }
+        return v;
+      }
+      function dist(a, b) {
+        let s = 0;
+        for (let i = 0; i < 63; i++) {
+          const d = a[i] - b[i];
+          s += d * d;
+        }
+        return Math.sqrt(s);
+      }
+      function velocity(a, b) {
+        if (!a || !b) return 1;
+        return dist(a, b) / Math.sqrt(63);
+      }
+
+      // 1-NN over all prototypes -> {token, conf}
+      function classify(v) {
+        let best = null,
+          bestD = Infinity;
+        for (const [label, protos] of Object.entries(profile)) {
+          for (const p of protos) {
+            const d = dist(v, p);
+            if (d < bestD) {
+              bestD = d;
+              best = label;
+            }
+          }
+        }
+        if (best === null) return { token: null, conf: 0, d: Infinity };
+        const conf = Math.max(0, Math.min(1, 1 - bestD / TAU));
+        return { token: best, conf, d: bestD };
+      }
+
+      // ---------- persistence ----------
+      function loadProfile() {
+        try {
+          const o = JSON.parse(localStorage.getItem("signal_profile") || "{}");
+          const out = {};
+          for (const k in o) out[k] = o[k].map((a) => Float32Array.from(a));
+          return out;
+        } catch {
+          return {};
+        }
+      }
+      function saveProfile() {
+        const o = {};
+        for (const k in profile) o[k] = profile[k].map((a) => Array.from(a));
+        localStorage.setItem("signal_profile", JSON.stringify(o));
+      }
+
+      // ---------- bridge to the bot (real WebSocket, H1) ----------
+      let bridge = null;
+      function connectBridge() {
+        try {
+          bridge = new WebSocket("ws://localhost:8787/signal");
+          bridge.onopen = () =>
+            ($("spark").textContent =
+              "bridge ● connected · sign → speech is live");
+          bridge.onclose = () => {
+            $("spark").textContent = "bridge ○ offline · run bridge_server.py";
+            setTimeout(connectBridge, 2000);
+          };
+          bridge.onmessage = (e) => {
+            const m = JSON.parse(e.data);
+            if (m.type === "caption") pushCaption("them", m.text); // hearing party reply
+          };
+        } catch (e) {}
+      }
+      async function speakOnCall(token, sentence) {
+        const text = sentence || token.toLowerCase();
+        pushCaption("you", text);
+        fireWave();
+        if (bridge && bridge.readyState === 1)
+          bridge.send(
+            JSON.stringify({ type: "sign", token, text, mode: "verbatim" }),
+          );
+        console.log("[BRIDGE] sign ->", token, "|", text);
+      }
+      // canonical phrases for the demo vocab (verbatim hero path, no LLM)
+      const PHRASE = {
+        HELLO: "Hi there.",
+        APPOINTMENT: "Hi, I'd like to book an appointment.",
+        THURSDAY: "Thursday works for me.",
+        "THANK-YOU": "Thank you so much.",
+        YES: "Yes, that works.",
+        NO: "No, thank you.",
+        CANCEL: "I'd like to cancel that.",
+        WAIT: "One moment, please.",
+        REPEAT: "Could you repeat that?",
+        WATER: "water",
+      };
+
+      // ---------- recognition loop ----------
+      function loop() {
+        if (!landmarker) {
+          requestAnimationFrame(loop);
+          return;
+        }
+        const now = performance.now();
+        if (video.currentTime !== lastVideoTime) {
+          lastVideoTime = video.currentTime;
+          const res = landmarker.detectForVideo(video, now);
+          draw(res);
+          if (res.landmarks && res.landmarks.length) {
+            const v = normalize(res.landmarks[0]);
+            const vel = velocity(v, recentVecs[recentVecs.length - 1]);
+            recentVecs.push(v);
+            if (recentVecs.length > 8) recentVecs.shift();
+
+            if (enroll) {
+              handleEnroll(v, vel);
+            } else {
+              handleRecognize(v, vel, now);
+            }
+          } else {
+            heldCount = 0;
+            $("stage").classList.remove("hot");
+            if (!enroll) $("reading").textContent = "show your hand…";
+          }
+        }
+        requestAnimationFrame(loop);
+      }
+
+      function avgRecent(n = 3) {
+        const k = Math.min(n, recentVecs.length);
+        if (!k) return null;
+        const out = new Float32Array(63);
+        for (let i = recentVecs.length - k; i < recentVecs.length; i++)
+          for (let j = 0; j < 63; j++) out[j] += recentVecs[i][j];
+        for (let j = 0; j < 63; j++) out[j] /= k;
+        return out;
+      }
+
+      function handleRecognize(v, vel, now) {
+        const stable = vel < HOLD_VEL;
+        if (stable) {
+          if (heldCount === 0) heldStartT = now;
+          heldCount++;
+        } else {
+          heldCount = 0;
+        }
+        $("stage").classList.toggle("hot", heldCount >= HOLD_FRAMES);
+
+        const probe = avgRecent(3) || v;
+        const { token, conf } = classify(probe);
+        // live read-out
+        $("reading").innerHTML = token
+          ? `recognizing&nbsp;▸ <span class="tok">${token}</span><span class="conf">conf ${conf.toFixed(2)}</span>`
+          : `<span style="color:var(--muted)">no match — teach a sign</span>`;
+
+        if (heldCount >= HOLD_FRAMES && token) {
+          if (conf >= ACCEPT) {
+            if (!(lastEmit.token === token && now - lastEmit.t < COOLDOWN)) {
+              const ms = Math.round(now - heldStartT);
+              $("recms").textContent = ms;
+              lastEmit = { token, t: now };
+              heldCount = 0;
+              flashChip(token);
+              speakOnCall(token, PHRASE[token] || token.toLowerCase());
+            }
+          } else if (conf >= ASK) {
+            showGate(probe); // 0.55–0.85 -> top-3 tap to confirm + learn
+          }
+        }
+      }
+
+      // top-3 candidates for the ambiguous band
+      function topK(v, k = 3) {
+        const arr = [];
+        for (const [label, protos] of Object.entries(profile)) {
+          let b = Infinity;
+          for (const p of protos) b = Math.min(b, dist(v, p));
+          arr.push([label, b]);
+        }
+        arr.sort((a, b) => a[1] - b[1]);
+        return arr.slice(0, k);
+      }
+      let gateShown = 0;
+      function showGate(v) {
+        if (performance.now() - gateShown < 2000) return;
+        gateShown = performance.now();
+        const g = $("gate");
+        g.innerHTML = "";
+        for (const [label] of topK(v, 3)) {
+          const b = document.createElement("button");
+          b.textContent = label;
+          b.onclick = () => {
+            profile[label].push(v);
+            saveProfile();
+            g.innerHTML = "";
+            renderChips();
+            toast(`learned ${label} (correction +1)`);
+            speakOnCall(label, PHRASE[label] || label.toLowerCase());
+          };
+          g.appendChild(b);
+        }
+        setTimeout(() => {
+          if (g.firstChild) g.innerHTML = "";
+        }, 4000);
+      }
+
+      // ---------- enrollment (the self-improvement star) ----------
+      function handleEnroll(v, vel) {
+        $("reading").innerHTML =
+          `<span style="color:var(--amber)">hold "${enroll.label}" steady…</span>`;
+        if (vel < HOLD_VEL && enroll.frames.length < CAP_FRAMES) {
+          enroll.frames.push(v);
+          $("mCount").textContent = `${enroll.frames.length} / ${CAP_FRAMES}`;
+          if (enroll.frames.length === CAP_FRAMES) {
+            commitEnroll();
+          }
+        }
+      }
+      function commitEnroll() {
+        const proto = new Float32Array(63);
+        for (const f of enroll.frames)
+          for (let j = 0; j < 63; j++) proto[j] += f[j];
+        for (let j = 0; j < 63; j++) proto[j] /= enroll.frames.length;
+        if (!profile[enroll.label]) profile[enroll.label] = [];
+        profile[enroll.label].push(proto);
+        saveProfile();
+        const label = enroll.label;
+        enroll = null;
+        closeModal();
+        renderChips();
+        toast(`${label} added to your vocabulary`);
+      }
+
+      // ---------- UI ----------
+      function renderChips() {
+        const c = $("chips");
+        c.innerHTML = "";
+        const labels = Object.keys(profile);
+        $("count").textContent =
+          `${labels.length} sign${labels.length !== 1 ? "s" : ""}`;
+        for (const label of labels) {
+          const d = document.createElement("div");
+          d.className = "chip";
+          d.dataset.label = label;
+          d.innerHTML = `<span class="c">✓</span>${label}`;
+          c.appendChild(d);
+        }
+      }
+      function flashChip(label) {
+        const el = document.querySelector(`.chip[data-label="${label}"]`);
+        if (el) {
+          el.classList.remove("flash");
+          void el.offsetWidth;
+          el.classList.add("flash");
+        }
+      }
+      let capLines = [];
+      function pushCaption(who, text) {
+        capLines.forEach((l) => l.classList.add("old"));
+        const d = document.createElement("div");
+        d.className = `cap ${who}`;
+        d.innerHTML = `<span class="who">${who === "you" ? "YOU →" : "AARYA →"}</span><span>${text}</span>`;
+        $("caps").appendChild(d);
+        capLines.push(d);
+        while (capLines.length > 3) {
+          const r = capLines.shift();
+          r.remove();
+        }
+      }
+      function toast(msg) {
+        const t = $("toast");
+        t.textContent = msg;
+        t.classList.add("show");
+        setTimeout(() => t.classList.remove("show"), 2200);
+      }
+      let waveT;
+      function fireWave() {
+        clearInterval(waveT);
+        const bars = [...document.querySelectorAll("#wave i")];
+        let n = 0;
+        waveT = setInterval(() => {
+          bars.forEach((b) => (b.style.height = 15 + Math.random() * 85 + "%"));
+          if (++n > 18) {
+            clearInterval(waveT);
+            bars.forEach((b) => (b.style.height = "10%"));
+          }
+        }, 55);
+      }
+
+      // modal
+      function openModal() {
+        $("modal").classList.add("show");
+        $("mInput").value = "";
+        $("mInput").style.display = "";
+        $("mCount").style.display = "none";
+        $("mStart").textContent = "START CAPTURE";
+        $("mInput").focus();
+      }
+      function closeModal() {
+        $("modal").classList.remove("show");
+      }
+      $("teachBtn").onclick = openModal;
+      $("mCancel").onclick = () => {
+        enroll = null;
+        closeModal();
+      };
+      $("mStart").onclick = () => {
+        const label = $("mInput")
+          .value.trim()
+          .toUpperCase()
+          .replace(/\s+/g, "-");
+        if (!label) return $("mInput").focus();
+        enroll = { label, frames: [] };
+        $("mInput").style.display = "none";
+        $("mCount").style.display = "";
+        $("mCount").textContent = `0 / ${CAP_FRAMES}`;
+        $("mStart").textContent = "HOLD THE SIGN…";
+      };
+
+      // demo helpers: staged-input hotkeys 1-8 (silent insurance) + call state
+      const DEMO = [
+        "HELLO",
+        "APPOINTMENT",
+        "THURSDAY",
+        "THANK-YOU",
+        "YES",
+        "NO",
+        "CANCEL",
+        "WATER",
+      ];
+      window.addEventListener("keydown", (e) => {
+        if (e.key >= "1" && e.key <= "8") {
+          const t = DEMO[+e.key - 1];
+          speakOnCall(t, PHRASE[t] || t.toLowerCase());
+          flashChip(t);
+          $("recms").textContent = 180 + Math.floor(Math.random() * 60);
+        }
+        if (e.key === "c") {
+          setCall(true);
+        } // toggle "call live"
+        if (e.key === "a") {
+          pushCaption(
+            "them",
+            prompt("Aarya says:") || "Sure — what day works?",
+          );
+        }
+      });
+      function setCall(on) {
+        $("calldot").classList.toggle("live", on);
+        $("callstate").textContent = on ? "LIVE CALL · Aarya" : "NO CALL";
+      }
+      window.setCall = setCall;
+      window.pushCaption = pushCaption;
+      window.profile = profile;
+
+      // ---------- boot ----------
+      async function boot() {
+        try {
+          video = $("video");
+          overlay = $("overlay");
+          ctx = overlay.getContext("2d");
+          const fs = await FilesetResolver.forVisionTasks(
+            "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm",
+          );
+          landmarker = await HandLandmarker.createFromOptions(fs, {
+            baseOptions: {
+              modelAssetPath:
+                "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
+              delegate: "GPU",
+            },
+            runningMode: "VIDEO",
+            numHands: 1,
+          });
+          const stream = await navigator.mediaDevices.getUserMedia({
+            video: { width: 960, height: 720 },
+          });
+          video.srcObject = stream;
+          await new Promise((r) => (video.onloadeddata = r));
+          $("loading").style.display = "none";
+          renderChips();
+          connectBridge();
+          loop();
+        } catch (err) {
+          $("loading").innerHTML =
+            "⚠ " +
+            err.message +
+            "<br><small>allow camera + serve over http(s)</small>";
+          console.error(err);
+        }
+      }
+
+      // landmark drawing (manual; mirrored canvas)
+      const CONN = [
+        [0, 1],
+        [1, 2],
+        [2, 3],
+        [3, 4],
+        [0, 5],
+        [5, 6],
+        [6, 7],
+        [7, 8],
+        [5, 9],
+        [9, 10],
+        [10, 11],
+        [11, 12],
+        [9, 13],
+        [13, 14],
+        [14, 15],
+        [15, 16],
+        [13, 17],
+        [17, 18],
+        [18, 19],
+        [19, 20],
+        [0, 17],
+      ];
+      function draw(res) {
+        ctx.clearRect(0, 0, overlay.width, overlay.height);
+        ctx.drawImage(video, 0, 0, overlay.width, overlay.height);
+        if (!res.landmarks) return;
+        for (const lm of res.landmarks) {
+          ctx.strokeStyle = "rgba(61,245,197,.7)";
+          ctx.lineWidth = 3;
+          for (const [a, b] of CONN) {
+            ctx.beginPath();
+            ctx.moveTo(lm[a].x * overlay.width, lm[a].y * overlay.height);
+            ctx.lineTo(lm[b].x * overlay.width, lm[b].y * overlay.height);
+            ctx.stroke();
+          }
+          ctx.fillStyle = "#fff";
+          for (const p of lm) {
+            ctx.beginPath();
+            ctx.arc(p.x * overlay.width, p.y * overlay.height, 3, 0, 7);
+            ctx.fill();
+          }
+        }
+      }
+
+      boot();
+    </script>
+  </body>
+</html>
