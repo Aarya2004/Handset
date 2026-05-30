@@ -35,12 +35,24 @@ REGION = os.getenv("AWS_REGION", "us-west-2")
 MODEL_ID = os.getenv("NEMOTRON_VL_MODEL", "nvidia.nemotron-nano-12b-v2")
 MAX_IMAGES = 4  # the model supports up to 4 high-res images
 
-SIGN_PROMPT = (
-    "These frames show a person communicating in American Sign Language. "
-    "Identify the single sign or fingerspelled word being formed. "
-    "Reply with ONLY the word in uppercase, nothing else. "
-    "If unsure, reply UNKNOWN."
-)
+# The demo sign vocabulary the VLM chooses from. Multiple-choice prompting is
+# what makes the VLM actually work: open-ended "identify the sign" returns
+# UNKNOWN, but "which of these is it?" with a candidate list succeeds (verified
+# live — an open-hand sign was correctly read as a wave).
+DEFAULT_VOCAB = [
+    "HELLO", "YES", "NO", "THANK-YOU", "APPOINTMENT", "CANCEL", "WAIT", "REPEAT", "WATER",
+]
+
+
+def _sign_prompt(vocab: list[str]) -> str:
+    options = ", ".join(vocab) + ", UNKNOWN"
+    return (
+        "These frames show a person making a single American Sign Language gesture. "
+        "First, briefly note the handshape you see. Then decide which ONE of these "
+        f"signs it most likely is: {options}. "
+        "End your reply with a final line of exactly: SIGN: <CHOICE> "
+        "where <CHOICE> is one option in uppercase."
+    )
 
 
 def _client():
@@ -59,17 +71,17 @@ def _strip_data_url(s: str) -> bytes:
     return base64.b64decode(s)
 
 
-def _build_body(frames: list[str]) -> dict:
+def _build_body(frames: list[str], vocab: list[str]) -> dict:
     """OpenAI-style chat payload with image_url blocks — the shape NVIDIA's
     Bedrock VL models accept. We keep base64 data URLs so no S3 round-trip."""
-    content = [{"type": "text", "text": SIGN_PROMPT}]
+    content = [{"type": "text", "text": _sign_prompt(vocab)}]
     for f in frames[:MAX_IMAGES]:
         # normalize to a data URL
         url = f if f.startswith("data:") else f"data:image/jpeg;base64,{f}"
         content.append({"type": "image_url", "image_url": {"url": url}})
     return {
         "messages": [{"role": "user", "content": content}],
-        "max_tokens": 16,
+        "max_tokens": 200,  # room for the handshape note + the SIGN: line
         "temperature": 0.2,
     }
 
@@ -93,11 +105,26 @@ def _extract_text(payload: dict) -> str:
     return json.dumps(payload)[:200]
 
 
-def recognize(frames: list[str]) -> dict:
+def _parse_sign(raw: str, vocab: list[str]) -> str:
+    """Pull the chosen sign from the model's reply. Prefers the 'SIGN: X' line;
+    falls back to the first vocab term that appears in the text."""
+    up = raw.upper()
+    m = re.search(r"SIGN:\s*([A-Z][A-Z\-']+)", up)
+    if m:
+        return m.group(1)
+    # fallback: any vocab term mentioned
+    for term in vocab + ["UNKNOWN"]:
+        if term.upper() in up:
+            return term.upper()
+    return "UNKNOWN"
+
+
+def recognize(frames: list[str], vocab: list[str] | None = None) -> dict:
     """Send sampled signing frames to Nemotron VL on Bedrock; return the sign guess."""
+    vocab = vocab or DEFAULT_VOCAB
     if not frames:
         return {"model": MODEL_ID, "sign": "UNKNOWN", "raw": "", "latency_ms": 0, "error": "no frames"}
-    body = _build_body(frames)
+    body = _build_body(frames, vocab)
     t0 = time.time()
     try:
         resp = _client().invoke_model(
@@ -108,9 +135,7 @@ def recognize(frames: list[str]) -> dict:
         )
         payload = json.loads(resp["body"].read())
         raw = _extract_text(payload).strip()
-        # first all-caps word is the sign
-        m = re.search(r"[A-Z][A-Z\-']{1,}", raw.upper())
-        sign = m.group(0) if m else (raw.split()[0].upper() if raw else "UNKNOWN")
+        sign = _parse_sign(raw, vocab)
         return {
             "model": MODEL_ID,
             "sign": sign,
