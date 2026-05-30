@@ -27,6 +27,7 @@ import {
 } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs";
 
 const HOLD_VEL = 0.03; // below this avg landmark velocity => "held" (raised from 0.018: tolerate natural hand tremor so commits aren't 1s+)
+const SHAPE_EPS = 0.025; // max handshape change (fingerSpread delta) to still count as "held". A hand translating slowly toward the next sign (movement epenthesis) has low velocity but a CHANGING handshape — this separates "arrived + holding" from "moving to the next sign". See ASL_DOMAIN.md §segmentation.
 const HOLD_FRAMES = 2; // consecutive held frames before commit (~66ms — fire the moment a confident sign is shown)
 const ACCEPT = 0.7,
   ASK = 0.45; // confidence gates (loosened so natural signing variation commits fast, not after 4s)
@@ -84,7 +85,8 @@ export function createRecognizer({
     heldCount = 0,
     heldStartT = 0,
     lastEmit = { token: null, t: 0 },
-    gateShown = 0;
+    gateShown = 0,
+    prevSpread = null; // last frame's handshape signature (for the stability gate)
   let enroll = null;
   let profile = loadJSON("signal_profile", {}, true); // {label: [Float32Array,...]}
   const lexicon = new Set(loadJSON("signal_lexicon", [], false));
@@ -149,6 +151,25 @@ export function createRecognizer({
       v[i * 3 + 2] = ((lm[i].z || 0) - (wrist.z || 0)) / scale;
     }
     return v;
+  }
+  // handshape signature: sum of fingertip→MCP distances, scale-normalized by hand
+  // size so the value is comparable regardless of distance to camera. Used by the
+  // hold gate — a STABLE spread means the handshape stopped forming (arrived), a
+  // CHANGING spread means the hand is still articulating / moving to the next sign.
+  const TIPS = [4, 8, 12, 16, 20],
+    MCPS = [2, 5, 9, 13, 17];
+  function fingerSpread(lm) {
+    const wrist = lm[0],
+      mid = lm[9];
+    const scale =
+      Math.hypot(mid.x - wrist.x, mid.y - wrist.y, (mid.z || 0) - (wrist.z || 0)) || 1e-6;
+    let s = 0;
+    for (let i = 0; i < 5; i++) {
+      const a = lm[TIPS[i]],
+        b = lm[MCPS[i]];
+      s += Math.hypot(a.x - b.x, a.y - b.y, (a.z || 0) - (b.z || 0)) / scale;
+    }
+    return s;
   }
   function dist(a, b) {
     let s = 0;
@@ -392,8 +413,11 @@ export function createRecognizer({
   }
 
   // ---------- recognition ----------
-  function handleRecognize(v, vel, now) {
-    const stable = vel < HOLD_VEL;
+  function handleRecognize(v, vel, now, shapeStable = true) {
+    // a true HOLD = low velocity AND handshape stopped changing. Velocity alone
+    // false-commits during movement epenthesis (hand drifting slowly to the next
+    // sign while the handshape is still forming). See ASL_DOMAIN.md §segmentation.
+    const stable = vel < HOLD_VEL && shapeStable;
     if (stable) {
       if (heldCount === 0) heldStartT = now;
       heldCount++;
@@ -450,11 +474,16 @@ export function createRecognizer({
         const vel = velocity(v, recentVecs[recentVecs.length - 1]);
         recentVecs.push(v);
         if (recentVecs.length > 8) recentVecs.shift();
+        // handshape stability: how much the spread changed since last frame
+        const spread = fingerSpread(lm);
+        const shapeStable = prevSpread === null || Math.abs(spread - prevSpread) < SHAPE_EPS;
+        prevSpread = spread;
         if (enroll) handleEnroll(v, vel);
-        else if (!trackMotion(vel, now)) handleRecognize(v, vel, now);
+        else if (!trackMotion(vel, now)) handleRecognize(v, vel, now, shapeStable);
       } else {
         motion.active = false;
         heldCount = 0;
+        prevSpread = null; // hand left frame — reset so re-entry isn't a false "stable"
       }
     }
     requestAnimationFrame(loop);
