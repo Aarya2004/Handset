@@ -1710,7 +1710,11 @@
         rec._teachResolve = done; // picked up by the learned() callback below
       };
 
-      // demo helpers: staged-input hotkeys 1-8 (silent insurance) + call state
+      // Keyboard fallback for the live demo: keys 1-8 trigger the SAME conduct
+      // path a recognized sign would (rec.conductIntent -> the real bot -> a real
+      // spoken call). It exists only so a camera/lighting failure on stage can't
+      // kill the run — it does not fake recognition or fabricate any result; it
+      // just substitutes the input event a sign would have produced.
       const DEMO = [
         "HELLO",
         "APPOINTMENT",
@@ -1721,16 +1725,18 @@
         "CANCEL",
         "WATER",
       ];
-      // hotkeys are SILENT DEMO INSURANCE — they drive the real recognizer paths
-      // (rec.conductIntent) so a key press is indistinguishable from a real sign.
+      // These keys drive the real recognizer/bot paths (rec.conductIntent) — the
+      // keypress stands in for the input event of a real sign, nothing downstream
+      // is mocked. Camera-failure fallback only; normal operation is the camera.
       window.addEventListener("keydown", (e) => {
         if (e.target && e.target.tagName === "INPUT") return;
         if (e.key >= "1" && e.key <= "8") {
           const t = DEMO[+e.key - 1];
           rec.conductIntent(t); // -> Nemotron -> spoken on the call (caption arrives via on.spoken)
           flashChip(t);
-          $("recms").innerHTML =
-            180 + Math.floor(Math.random() * 60) + "<small> ms</small>";
+          // No latency number here: the HUD only ever shows a REAL measured
+          // performance.now() delta from an actual recognition (see the motion
+          // path). We never paint a fabricated ms value. (REDTEAM.md / PRD.md.)
         }
         if (e.key === "c") setCall(true); // mark call live
         if (e.key === "a") {
