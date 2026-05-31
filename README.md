@@ -32,8 +32,7 @@ robocall?" / "What's the patient's DOB?" — **without the user signing anything
 
 ## 2. Demo video (< 60s)
 
-📹 **[ADD <60s VIDEO LINK]** — shows the *experience* (sign → live call booked while
-a skeptical receptionist pushes back) + what we learned building it.
+📹 **https://drive.google.com/file/d/1TTeO1lfBQuNXYKoC5nmG94CeMm53WGfy/view?usp=sharing**
 
 ## 3. How we used Cekura, NVIDIA, AWS & Pipecat
 
@@ -197,6 +196,23 @@ Everything (ASL-in → conduct → real call → captions) was built today on th
   (`omni_recognizer.py`).
 - The entire **GEPA-on-Nemotron + Cekura self-improvement/eval stack**
   (`optimizer/`, `cekura/`, the two registered agents, scenarios, stress battery).
+
+## 5b. What we learned
+
+A few things that surprised us building this:
+
+- **Movement is the signal, not the pose.** Static k-NN on a single frame can't tell
+  PLEASE from THANK-YOU, they share a handshape and differ only in *motion*. Letting
+  k-NN commit those was our biggest source of wrong reads. The fix: route movement
+  signs to the VLM (which sees the whole trajectory) and never let a single-frame
+  classifier decide them.
+- **Reasoning models need a token budget and an empty-content fallback.** Nemotron
+  Omni burns hundreds of tokens *thinking* before it answers; too small a `max_tokens`
+  and `content` comes back empty. We had to bump the budget and fall back to the
+  reasoning field.
+- **An ambiguous read should never reach a live phone.** We added a confirm-before-speak
+  gate, mid-confidence signs surface a guess and wait, so a misrecognition can't get
+  spoken on a real call to a real person.
 
 ## 6. Feedback
 
