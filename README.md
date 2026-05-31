@@ -32,7 +32,7 @@ robocall?" / "What's the patient's DOB?" — **without the user signing anything
 
 ## 2. Demo video (< 60s)
 
-📹 **https://drive.google.com/file/d/1TTeO1lfBQuNXYKoC5nmG94CeMm53WGfy/view?usp=sharing**
+📹 **https://drive.google.com/file/d/1RErbpHTNV3EGgepAkPZijF63p15ueP78/view?usp=sharing**
 
 ## 3. How we used Cekura, NVIDIA, AWS & Pipecat
 
