@@ -47,6 +47,11 @@ const MOTION_MAX_FRAMES = MOTION_SEND_FRAMES; // kept for compatibility
 const MOTION_COOLDOWN = 2800;
 const MOTION_TIMEOUT_MS = 8000; // VLM round-trip is ~2-3s (non-reasoning VL); 2.2s aborted every real call -> "motion reader unavailable"
 const MOTION_MIN_CONF = 0.55;
+// Omni motion reads at/above this speak immediately; below it (but still >= MIN_CONF)
+// surface the guess and wait for an explicit confirm before sending to the call.
+// Movement signs that look alike statically (PLEASE vs THANK-YOU) only differ in the
+// trajectory Omni sees — so when Omni is merely "okay" sure, a human confirms first.
+const MOTION_CONFIRM_CONF = 0.8;
 
 const WASM =
   "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm";
@@ -72,6 +77,10 @@ export function createRecognizer({
   vlmUrl = "http://localhost:8788/recognize-omni",
   dynamicRecognition = true,
   dynamicVocab = ["THANK-YOU", "YES", "NO", "HELLO", "WAIT", "REPEAT"],
+  // broadenMotion=true accepts ANY sign the VLM names, not just dynamicVocab —
+  // pairs with the server's OMNI_BROADEN flag. dynamicVocab is still sent as
+  // candidate hints. Set false to restrict motion commits to the curated list.
+  broadenMotion = true,
   on = {},
 } = {}) {
   const emit = (name, ...a) => {
@@ -304,6 +313,8 @@ export function createRecognizer({
       clearTimeout(timer);
     }
   }
+  // Holds an Omni motion read awaiting user confirmation (conf below MOTION_CONFIRM_CONF).
+  let pendingMotion = null;
   async function classifyMotion(frames) {
     if (motion.busy || frames.length < 2) return;
     motion.busy = true;
@@ -315,7 +326,7 @@ export function createRecognizer({
       const conf = Number(result.confidence ?? 0);
       const latency = Math.round(performance.now() - t0);
       if (
-        !dynamicVocab.includes(token) ||
+        (!broadenMotion && !dynamicVocab.includes(token)) ||
         token === "UNKNOWN" ||
         conf < MOTION_MIN_CONF
       ) {
@@ -324,8 +335,16 @@ export function createRecognizer({
       }
       heldCount = 0;
       lastSign = null;
-      bufferSign(token, conf, latency);
-      emit("motion", "recognized", { ...result, latencyMs: latency });
+      if (conf < MOTION_CONFIRM_CONF) {
+        // Omni is only moderately sure — DON'T speak it on the live call yet. Surface
+        // the guess; the user confirms (commit) or re-signs (it just expires). Nothing
+        // wrong goes out the phone on an ambiguous read.
+        pendingMotion = { token, conf, latency };
+        emit("motion", "confirm", { ...result, latencyMs: latency });
+      } else {
+        bufferSign(token, conf, latency);
+        emit("motion", "recognized", { ...result, latencyMs: latency });
+      }
     } catch (err) {
       emit("motion", "error", err);
     } finally {
@@ -457,6 +476,14 @@ export function createRecognizer({
     emit("reading", token, conf);
 
     if (heldCount >= HOLD_FRAMES && token) {
+      // Movement signs (dynamicVocab) look alike on a single held frame — PLEASE vs
+      // THANK-YOU differ only in the MOTION. Never let static k-NN commit them; the
+      // motion path sends the whole trajectory to Omni, which can actually tell them
+      // apart. Static k-NN stays the fast spine for truly static signs (letters, etc.).
+      if (dynamicVocab.includes(token)) {
+        // let the gesture keep recording; trackMotion/finishMotion -> Omni decides
+        return;
+      }
       if (conf >= ACCEPT) {
         heldCount = 0;
         bufferSign(token, conf, Math.round(now - heldStartT)); // accumulate -> sentence (dedupe inside)
@@ -566,6 +593,17 @@ export function createRecognizer({
         wsSend({ type: "sign", token: label, text, mode: "verbatim" });
         emit("learned", label, Object.keys(profile).length);
         pendingProbe = null;
+      }
+    },
+    // Commit a low-confidence Omni motion read the user just confirmed (-> bot speaks it).
+    // accept=false (user re-signs / dismisses) just drops it without speaking.
+    confirmMotion(accept = true) {
+      if (!pendingMotion) return;
+      const { token, conf, latency } = pendingMotion;
+      pendingMotion = null;
+      if (accept) {
+        bufferSign(token, conf, latency);
+        emit("motion", "recognized", { token, confidence: conf, latencyMs: latency, confirmed: true });
       }
     },
     // the AGENT path: raw signed intent -> Nemotron -> sentence (arrives via on.spoken)
