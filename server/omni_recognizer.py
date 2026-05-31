@@ -43,6 +43,14 @@ BACKEND = os.getenv("VLM_BACKEND", "omni").strip().lower()
 REGION = os.getenv("AWS_REGION", "us-west-2")
 MAX_IMAGES = int(os.getenv("NEMOTRON_VL_MAX_IMAGES", "6"))  # more frames across the movement = better motion signal for the VLM
 
+# ── Broaden flag ──────────────────────────────────────────────────────────────
+# OMNI_BROADEN=1 (default) lets the VLM name ANY ASL sign, using DEFAULT_VOCAB
+# only as worked examples/hints rather than a hard menu — so it isn't capped at
+# the 9 demo signs. Set OMNI_BROADEN=0 to restore the strict closed-set
+# multiple-choice prompt (more reliable on the demo vocab, but everything outside
+# the list collapses to UNKNOWN).
+BROADEN = os.getenv("OMNI_BROADEN", "1").strip() != "0"
+
 # Omni (OpenRouter) config — the new default.
 # Nemotron 3 Nano Omni — the model we showcase (the multimodal "Omni" sponsor
 # surface). It's a reasoning model, so it gets token headroom (OMNI_MAX_TOKENS,
@@ -88,6 +96,22 @@ def _sign_prompt(vocab: list[str]) -> str:
         for term in vocab
         if term in SIGN_HINTS
     )
+    if BROADEN:
+        # Open-ended: name ANY sign. The vocab is given as worked examples (with
+        # cues) so the model still anchors on the motion-reading style that works,
+        # but it is free to return a sign not on the list.
+        return (
+            "You are identifying ONE short American Sign Language sign from chronological video frames. "
+            "The frames are ordered from earliest to latest; use the motion across frames, not only the final pose. "
+            "Name the most likely ASL sign as a single UPPERCASE token (use a hyphen for multi-word glosses, "
+            "e.g. THANK-YOU). Only answer UNKNOWN if no hand/sign is visible at all. "
+            "These common signs are worked examples of how to read motion — you are NOT limited to them:\n"
+            f"{hints}\n"
+            f"(example tokens: {', '.join(vocab)})\n"
+            "Return exactly two lines:\n"
+            "SIGN: <TOKEN>\n"
+            "CONFIDENCE: <0.00-1.00>"
+        )
     return (
         "You are classifying ONE short American Sign Language sign from chronological video frames. "
         "The frames are ordered from earliest to latest; use the motion across frames, not only the final pose. "
@@ -176,6 +200,9 @@ def _parse_sign(raw: str, vocab: list[str]) -> str:
     m = re.search(r"SIGN:\s*([A-Z][A-Z\-']+)", up)
     if m:
         choice = m.group(1)
+        if BROADEN:
+            # Open-ended: trust whatever token the model named (it may not be in vocab).
+            return choice
         allowed = {term.upper() for term in vocab} | {"UNKNOWN"}
         return choice if choice in allowed else "UNKNOWN"
     # fallback: any vocab term mentioned
