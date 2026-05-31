@@ -1520,6 +1520,19 @@
                 "color:#76b900;font-weight:600", "color:inherit",
                 { sign, confidence: conf, model: data.model, backend: data.backend, raw: data.raw },
               );
+            } else if (state === "confirm") {
+              // Omni read it, but only moderately sure — confirm before it speaks on the call.
+              setMotionBusy(false);
+              const sign = String(data.sign || "").toUpperCase();
+              const conf = Number(data.confidence || 0);
+              $("reading").innerHTML = `<span class="tok">${sign}?</span><span class="conf">${Math.round(conf * 100)}%</span>`;
+              if (data.latencyMs) $("recms").innerHTML = data.latencyMs + "<small> ms</small>";
+              console.log(
+                `%c[VLM motion] ${data.model || "?"}%c → ${sign} (conf ${conf.toFixed(2)}) — awaiting confirm`,
+                "color:#c08a5e;font-weight:600", "color:inherit",
+                { sign, confidence: conf, model: data.model, raw: data.raw },
+              );
+              showMotionConfirm(sign);
             } else if (state === "unclear") {
               setMotionBusy(false);
               $("reading").innerHTML = `<span style="color:var(--clay)">motion unclear — try once more</span>`;
@@ -1585,6 +1598,24 @@
           g.appendChild(b);
         });
         setTimeout(() => { if (g.firstChild) g.innerHTML = ""; }, 4000);
+      }
+
+      // Confirm-before-speak for a moderately-confident Omni motion read. "Yes" -> the
+      // bot speaks it on the call; "Re-sign" drops it (re-signing replaces it anyway).
+      function showMotionConfirm(sign) {
+        const g = $("gate");
+        g.innerHTML = "";
+        const yes = document.createElement("button");
+        yes.textContent = `Yes — ${sign}`;
+        yes.onclick = () => { rec.confirmMotion(true); g.innerHTML = ""; };
+        const no = document.createElement("button");
+        no.textContent = "Re-sign";
+        no.style.opacity = "0.7";
+        no.onclick = () => { rec.confirmMotion(false); g.innerHTML = ""; $("reading").textContent = "Show your hand to begin…"; };
+        g.appendChild(yes);
+        g.appendChild(no);
+        // auto-drop (no speak) if ignored — never let a stale guess fire later
+        setTimeout(() => { if (g.firstChild) { rec.confirmMotion(false); g.innerHTML = ""; } }, 6000);
       }
 
       // ---------- UI ----------
