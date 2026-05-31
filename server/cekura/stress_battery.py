@@ -1,7 +1,7 @@
 """
 server/cekura/stress_battery.py — INDEPENDENT robustness stress-test of the Handset
 CONDUCT agent. This is a THIRD measurement (besides GEPA's own held-out eval and
-Cekura's certification) of whether the GEPA-optimized prompt is genuinely more robust
+Cekura's independent scoring) of whether the GEPA-optimized prompt is genuinely more robust
 than the shipping baseline.
 
 DESIGN PRINCIPLES (honest, un-rigged):

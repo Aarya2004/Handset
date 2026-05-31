@@ -5,7 +5,7 @@ simulate adversarial receptionists against our agent and SCORE the calls with it
 own metrics. Cekura plays the receptionist; our Nemotron conduct agent is the agent
 under test, and it speaks first (agent_gives_first_message=true).
 
-Two paths select which conduct prompt is under test, so Cekura certifies the GEPA
+Two paths select which conduct prompt is under test, so Cekura scores the GEPA
 before/after INDEPENDENTLY (its simulator + its scorer, not our hand-rolled judge):
   /baseline -> the real shipping CONDUCT_SYSTEM (no optimization)
   /gepa     -> the GEPA-optimized prompt (server/optimizer/optimized_prompt.txt)

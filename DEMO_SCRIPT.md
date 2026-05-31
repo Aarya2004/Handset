@@ -29,8 +29,9 @@
 > voice agent for the calls Deaf people can't make — and it gets better on its
 > own. We let GEPA, running entirely on Nemotron, read _why_ adversarial
 > receptionists hung up and rewrite the agent's own prompt. On a held-out set of
-> intents it had never seen, booking went from 54% to 70%. And Cekura — the host
-> — independently certified that gain.
+> intents it had never seen, booking went from 54% to 70%. And we wired that
+> agent into Cekura — the host's own platform — so the same gain can be
+> independently re-scored on adversarial receptionists it runs itself.
 >
 > Sign it. We'll say it. We'll handle the rest.
 
@@ -70,13 +71,13 @@ _(~58s at a natural pace. Drop the lexicon sentence if running long.)_
 
 - Cut to the Cekura dashboard (browser tab, pre-loaded).
 - "We didn't hand-tune this prompt. GEPA — running on Nemotron — read the failure transcripts and rewrote it. Here's the same agent, baseline prompt versus GEPA prompt, scored by Cekura on adversarial receptionists it ran itself."
-- Read the certified numbers off the board. Close: "The host platform certified the self-improvement. That's the loop."
+- Read the per-metric scores off the board (result IDs below). Close: "The host platform scored both prompts on receptionists it ran itself — optimizer and judge are different parties. That's the loop."
 
 **Hero moment, stated once for the judges:** _a word the Deaf user signed, coming out of a real phone call as natural speech, with the room hearing it._ Everything else supports that one second.
 
 ### Recorded-backup fallback
 
-A 90s screen+phone recording of the full Beat 1→4 run sits one keypress away (`demo-backup.mp4`, also uploaded so it survives a dead laptop). **Trigger to switch:** camera fails to commit a sign within ~10s, OR the Twilio call doesn't connect within two rings. Say plainly: _"Live telephony on conference WiFi — here's the same run we recorded an hour ago,"_ and play it. Never debug on stage. The Cekura numbers and the GEPA result are real regardless of whether the live call connects, so the self-improvement story is fallback-proof.
+A 90s screen+phone recording of the full Beat 1→4 run sits one keypress away (`demo-backup.mp4`, also uploaded so it survives a dead laptop). **Trigger to switch:** camera fails to commit a sign within ~10s, OR the Twilio call doesn't connect within two rings. Say plainly: _"Live telephony on conference WiFi — here's the same run we recorded an hour ago,"_ and play it. Never debug on stage. The Cekura run IDs and the GEPA result are real regardless of whether the live call connects, so the self-improvement story is fallback-proof.
 
 ---
 
@@ -85,13 +86,20 @@ A 90s screen+phone recording of the full Beat 1→4 run sits one keypress away (
 - **Per-user k-NN sign adaptation.** MediaPipe Hands gives 21 normalized landmarks per frame, client-side. "Teach a sign" enrolls 5-frame prototypes into a per-label set in `localStorage` (`signal_profile`); recognition is nearest-prototype with a distance-scaled confidence gate (accept / ask-to-confirm / reject) plus dwell-to-commit. It adapts to _one person's_ hand shape and signing style instead of forcing a universal model — and it's private by construction (no landmarks leave the device). Ambiguous reads surface a top-3 the user confirms, which itself enrolls a new prototype.
 - **All-NVIDIA conduct + ASR.** The conduct agent is Nemotron (`enable_thinking=false` — mandatory, else `content` is null on the vLLM endpoint) over a Pipecat pipeline; TTS to a real Twilio outbound call; hearing-side speech via Nemotron ASR. The hearing transcript is then word-boosted against the user's personal lexicon (`lexicon.py`, difflib) so meds/names/days snap to canonical spelling — the dangerous-error class in a medical call.
 - **GEPA-on-Nemotron, honestly measured.** `dspy.GEPA` (SOTA reflective prompt optimizer) rewrote the conduct prompt by reading _why_ adversarial receptionists hung up — with Nemotron as **both** the task LM and the reflection LM (`server/optimizer/run_gepa.py`). Scenarios are split disjoint by intent (train / val / **held-out**); GEPA never sees the held-out intents, so 54% → 70% is a real generalization measure, not memorization. Wilson 95% CIs reported; they overlap at n=24, so we present it as an honest point-estimate gain to scale-and-certify, not a significance claim. GEPA's learned behaviors: identify as a human assistant up front, and proactively verify patient name + DOB.
-- **Cekura certification (independent).** We exposed the Nemotron conduct agent over Cekura's WebSocket chat-test protocol (`server/cekura/conduct_ws.py`, `/baseline` vs `/gepa` paths) and registered two Cekura agents. Cekura simulated adversarial receptionists (robocall-skeptic, impatient, verification-gatekeeper, + a cooperative control) and scored every call with its LLM-judge metrics (Booking Completed, Handled Identity Verification, Sounded Human / Not Robocall). **GEPA optimizes; Cekura simulates and scores — the optimizer and the judge are different parties.**
+- **Cekura independent scoring.** We exposed the Nemotron conduct agent over Cekura's WebSocket chat-test protocol (`server/cekura/conduct_ws.py`, `/baseline` vs `/gepa` paths) and registered two Cekura agents. Cekura simulated adversarial receptionists (robocall-skeptic, impatient, verification-gatekeeper, + a cooperative control) and scored every call with its LLM-judge metrics (Booking Completed, Handled Identity Verification, Sounded Human / Not Robocall). **GEPA optimizes; Cekura simulates and scores — the optimizer and the judge are different parties.**
 
-  `[CEKURA RESULTS: baseline __% → GEPA __% booking, certified on Cekura dashboard]`
+  **Cekura runs (verified, project 5860 / org 4826):** Baseline agent #18061 →
+  result #591398 (12 WebSocket calls); GEPA agent #18062 → result #591399 (12
+  WebSocket calls). Both ran the 4 receptionist personas (Robocall Skeptic,
+  Impatient, Verification Gatekeeper, Cooperative control), all completed, zero
+  call errors. (Separately, the GEPA *held-out* eval in `run_gepa.py` measured
+  booking ~54% → ~70%, Wilson CIs overlap at n=24 — an honest point estimate, not
+  a significance claim.) Read Cekura's own per-metric scores off the dashboard for
+  these two result IDs at demo time — that's the independent re-score.
 
 - **Dynamic-sign tier.** Movement signs (THANK-YOU etc.) that static k-NN can't read go through **NVIDIA Nemotron 3 Nano Omni** (multimodal, via OpenRouter — `omni_recognizer.py`): recognizer.js detects a motion burst, sends the frames, Omni names the sign, and it feeds back into the same conduct path. On-device MediaPipe k-NN stays the fast spine for static signs; Omni handles movement — the "open NVIDIA multimodal model, measured" story, now on the live path.
 
-**Sponsor surface (all real, all in the live or eval path):** NVIDIA Nemotron (conduct LLM + ASR + GEPA reflection LM + **Nano Omni multimodal for dynamic signs**); Cekura (simulation + scoring + certified self-improvement loop); Daily/Pipecat (bot orchestration); Twilio (the real outbound call).
+**Sponsor surface (all real, all in the live or eval path):** NVIDIA Nemotron (conduct LLM + ASR + GEPA reflection LM + **Nano Omni multimodal for dynamic signs**); Cekura (independent simulation + scoring of the self-improvement loop); Daily/Pipecat (bot orchestration); Twilio (the real outbound call).
 
 ---
 
